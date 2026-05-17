@@ -184,7 +184,7 @@ function App() {
       })),
   }), [location]);
 
-  const [jointMap, setJointMap] = useState<Record<string, boolean | null>>({});
+  const [jointMap, setJointMap] = useState<Record<string, string | null>>({});
   type PhotoRecord = { id: string; date: string | null; description: string | null; photos: (string | null)[] | null };
   const [photosData, setPhotosData] = useState<PhotoRecord[]>([]);
   const [date, setDate] = useState("");
@@ -290,7 +290,7 @@ function App() {
 
   // Build jointMap directly from Amplify location state (no external fetch needed).
   useEffect(() => {
-    const map: Record<string, boolean | null> = {};
+    const map: Record<string, string | null> = {};
     location.forEach(loc => { map[loc.id] = loc.joint ?? null; });
     setJointMap(map);
   }, [location]);
@@ -1094,7 +1094,7 @@ function App() {
                           <TableCell /* width="15%" */>{location.photos ? location.photos.length : 0}</TableCell>
                           <TableCell /* width="15%" */>{location.lat != null ? Number(location.lat).toFixed(6) : ''}</TableCell>
                           <TableCell /* width="15%" */>{location.lng != null ? Number(location.lng).toFixed(6) : ''}</TableCell>
-                          <TableCell>{jointMap[location.id] == null ? '' : jointMap[location.id] ? 'true' : 'false'}</TableCell>
+                          <TableCell>{jointMap[location.id] ?? ''}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1139,9 +1139,9 @@ function App() {
               };
 
               const MH_UNIT_COST = 1500;
-              const mhCount = location.filter(loc => loc.type === "wastewater" && jointMap[loc.id] === false).length;
+              const mhCount = location.filter(loc => loc.type === "wastewater" && jointMap[loc.id] == null).length;
               const mhCost = mhCount * MH_UNIT_COST;
-              const swMhCount = location.filter(loc => loc.type === "stormwater" && jointMap[loc.id] === false).length;
+              const swMhCount = location.filter(loc => loc.type === "stormwater" && jointMap[loc.id] == null).length;
               const swMhCost = swMhCount * MH_UNIT_COST;
 
               const t1Cost = computePipeTotal("water");
