@@ -671,7 +671,7 @@ function App() {
     } else if (value === "street") {
       setBasemap("mapbox://styles/mapbox/streets-v12")
     } else if (value === "satellite") {
-      setBasemap("mapbox://styles/hazensawyer/clf4dasal001301qvxatwv8md")
+      setBasemap("mapbox://styles/mapbox/satellite-streets-v12")
     }
   };
 
@@ -685,10 +685,10 @@ function App() {
           Sign out
         </Button>
         <Button onClick={createLocation} backgroundColor={"azure"} color={"red"}>
-          + new
+          + New
         </Button>
         <Button onClick={handleCal} backgroundColor={"lightyellow"} color={"darkblue"}>
-          Cal
+          QC
         </Button>
         {calResult !== null && (
           <span style={{ alignSelf: "center", fontWeight: "bold" }}>
