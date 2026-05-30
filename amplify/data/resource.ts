@@ -29,6 +29,20 @@ const schema = a.schema({
       dates: a.hasMany('Date', 'locationId'),
     })
     .authorization((allow) => [allow.publicApiKey()]),
+  Track: a
+    .model({
+      track: a.integer().required(),
+      geometry: a.string().default('line'),
+      ft2: a.float(),
+      yd2: a.float(),
+      unitprice: a.float(),
+      quan: a.float(),
+      value: a.float(),
+      numpoint: a.integer(),
+      trip: a.boolean(),
+      cost: a.boolean(),
+    })
+    .authorization((allow) => [allow.publicApiKey()]),
   Date: a
     .model({
       date: a.date(),

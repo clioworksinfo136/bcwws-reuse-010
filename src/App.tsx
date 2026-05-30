@@ -85,6 +85,12 @@ const dateSelectionSet = [
 ] as const;
 type DateItem = SelectionSet<Schema['Date']['type'], typeof dateSelectionSet>;
 
+const trackInfoSelectionSet = [
+  'id', 'track', 'geometry', 'ft2', 'yd2', 'unitprice',
+  'quan', 'value', 'numpoint', 'trip', 'cost', 'createdAt', 'updatedAt',
+] as const;
+type TrackInfoItem = SelectionSet<Schema['Track']['type'], typeof trackInfoSelectionSet>;
+
 
 const theme: Theme = {
   name: "table-theme",
@@ -239,6 +245,23 @@ function App() {
     remark: "", comment: "", equipment: "",
   });
 
+  const [trackInfoList, setTrackInfoList] = useState<TrackInfoItem[]>([]);
+  const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
+  const [editTrackFields, setEditTrackFields] = useState({
+    track: "" as number | "", geometry: "line",
+    ft2: "" as number | "", yd2: "" as number | "",
+    unitprice: "" as number | "", quan: "" as number | "",
+    value: "" as number | "", numpoint: "" as number | "",
+    trip: false, cost: false,
+  });
+  const [newTrack, setNewTrack] = useState({
+    track: "" as number | "", geometry: "line",
+    ft2: "" as number | "", yd2: "" as number | "",
+    unitprice: "" as number | "", quan: "" as number | "",
+    value: "" as number | "", numpoint: "" as number | "",
+    trip: false, cost: false,
+  });
+
 
 
   const options: SelectOption[] = [
@@ -312,6 +335,16 @@ function App() {
     }).subscribe({
       next: (data) => setDateInfoList([...data.items]),
       error: (err) => console.error('Date observeQuery error:', err),
+    });
+    return () => sub.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const sub = client.models.Track.observeQuery({
+      selectionSet: [...trackInfoSelectionSet],
+    }).subscribe({
+      next: (data) => setTrackInfoList([...data.items]),
+      error: (err) => console.error('Track observeQuery error:', err),
     });
     return () => sub.unsubscribe();
   }, []);
@@ -597,6 +630,40 @@ function App() {
       equipment: editDateFields.equipment || undefined,
     });
     setEditingDateId(null);
+  }
+
+  function createTrackInfo() {
+    if (newTrack.track === "") { alert("Track number is required."); return; }
+    client.models.Track.create({
+      track: Number(newTrack.track),
+      geometry: newTrack.geometry || "line",
+      ft2: newTrack.ft2 !== "" ? Number(newTrack.ft2) : undefined,
+      yd2: newTrack.yd2 !== "" ? Number(newTrack.yd2) : undefined,
+      unitprice: newTrack.unitprice !== "" ? Number(newTrack.unitprice) : undefined,
+      quan: newTrack.quan !== "" ? Number(newTrack.quan) : undefined,
+      value: newTrack.value !== "" ? Number(newTrack.value) : undefined,
+      numpoint: newTrack.numpoint !== "" ? Number(newTrack.numpoint) : undefined,
+      trip: newTrack.trip,
+      cost: newTrack.cost,
+    });
+    setNewTrack({ track: "", geometry: "line", ft2: "", yd2: "", unitprice: "", quan: "", value: "", numpoint: "", trip: false, cost: false });
+  }
+
+  function saveTrackInfo(id: string) {
+    client.models.Track.update({
+      id,
+      track: editTrackFields.track !== "" ? Number(editTrackFields.track) : undefined,
+      geometry: editTrackFields.geometry || undefined,
+      ft2: editTrackFields.ft2 !== "" ? Number(editTrackFields.ft2) : undefined,
+      yd2: editTrackFields.yd2 !== "" ? Number(editTrackFields.yd2) : undefined,
+      unitprice: editTrackFields.unitprice !== "" ? Number(editTrackFields.unitprice) : undefined,
+      quan: editTrackFields.quan !== "" ? Number(editTrackFields.quan) : undefined,
+      value: editTrackFields.value !== "" ? Number(editTrackFields.value) : undefined,
+      numpoint: editTrackFields.numpoint !== "" ? Number(editTrackFields.numpoint) : undefined,
+      trip: editTrackFields.trip,
+      cost: editTrackFields.cost,
+    });
+    setEditingTrackId(null);
   }
 
   function handleCal() {
@@ -1337,6 +1404,174 @@ function App() {
                                 });
                               }} style={{ backgroundColor: 'green', color: 'white', border: 'none', padding: '4px 10px', cursor: 'pointer', marginRight: 4 }}>Modify</button>
                               <button onClick={() => { if (window.confirm(`Delete record for ${item.date}?`)) client.models.Date.delete({ id: item.id }); }} style={{ backgroundColor: 'red', color: 'white', border: 'none', padding: '4px 10px', cursor: 'pointer' }}>Delete</button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </ThemeProvider>
+              </ScrollView>
+            </>)
+          },
+          {
+            label: "Track Info",
+            value: "4",
+            content: (<>
+              <ScrollView
+                as="div"
+                ariaLabel="Track Info"
+                backgroundColor="var(--amplify-colors-white)"
+                borderRadius="6px"
+                color="var(--amplify-colors-blue-60)"
+                padding="1rem"
+                height="700px"
+              >
+                <ThemeProvider theme={theme} colorMode="light">
+                  <Table caption="" highlightOnHover={false} variation="striped"
+                    style={{ width: '100%', fontFamily: 'Arial, sans-serif' }}>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell as="th">Track</TableCell>
+                        <TableCell as="th">Geometry</TableCell>
+                        <TableCell as="th">ft²</TableCell>
+                        <TableCell as="th">yd²</TableCell>
+                        <TableCell as="th">Unit Price</TableCell>
+                        <TableCell as="th">Quantity</TableCell>
+                        <TableCell as="th">Value</TableCell>
+                        <TableCell as="th">Num Points</TableCell>
+                        <TableCell as="th">Trip</TableCell>
+                        <TableCell as="th">Cost</TableCell>
+                        <TableCell as="th"></TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {/* New record input row */}
+                      <TableRow>
+                        <TableCell>
+                          <Input type="number" placeholder="Track #" value={newTrack.track === "" ? "" : String(newTrack.track)}
+                            onChange={e => setNewTrack(p => ({ ...p, track: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '60px' }} />
+                        </TableCell>
+                        <TableCell>
+                          <select value={newTrack.geometry} onChange={e => setNewTrack(p => ({ ...p, geometry: e.target.value }))} style={{ padding: '4px' }}>
+                            <option value="line">line</option>
+                            <option value="point">point</option>
+                            <option value="polygon">polygon</option>
+                          </select>
+                        </TableCell>
+                        <TableCell>
+                          <Input type="number" placeholder="ft²" value={newTrack.ft2 === "" ? "" : String(newTrack.ft2)}
+                            onChange={e => setNewTrack(p => ({ ...p, ft2: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '70px' }} />
+                        </TableCell>
+                        <TableCell>
+                          <Input type="number" placeholder="yd²" value={newTrack.yd2 === "" ? "" : String(newTrack.yd2)}
+                            onChange={e => setNewTrack(p => ({ ...p, yd2: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '70px' }} />
+                        </TableCell>
+                        <TableCell>
+                          <Input type="number" placeholder="Unit Price" value={newTrack.unitprice === "" ? "" : String(newTrack.unitprice)}
+                            onChange={e => setNewTrack(p => ({ ...p, unitprice: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '80px' }} />
+                        </TableCell>
+                        <TableCell>
+                          <Input type="number" placeholder="Qty" value={newTrack.quan === "" ? "" : String(newTrack.quan)}
+                            onChange={e => setNewTrack(p => ({ ...p, quan: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '70px' }} />
+                        </TableCell>
+                        <TableCell>
+                          <Input type="number" placeholder="Value" value={newTrack.value === "" ? "" : String(newTrack.value)}
+                            onChange={e => setNewTrack(p => ({ ...p, value: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '70px' }} />
+                        </TableCell>
+                        <TableCell>
+                          <Input type="number" placeholder="# Points" value={newTrack.numpoint === "" ? "" : String(newTrack.numpoint)}
+                            onChange={e => setNewTrack(p => ({ ...p, numpoint: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '70px' }} />
+                        </TableCell>
+                        <TableCell>
+                          <input type="checkbox" checked={newTrack.trip} onChange={e => setNewTrack(p => ({ ...p, trip: e.target.checked }))} />
+                        </TableCell>
+                        <TableCell>
+                          <input type="checkbox" checked={newTrack.cost} onChange={e => setNewTrack(p => ({ ...p, cost: e.target.checked }))} />
+                        </TableCell>
+                        <TableCell>
+                          <button onClick={createTrackInfo} style={{ backgroundColor: '#2b6cb0', color: 'white', border: 'none', padding: '4px 10px', cursor: 'pointer' }}>Add</button>
+                        </TableCell>
+                      </TableRow>
+                      {[...trackInfoList].sort((a, b) => (a.track ?? 0) - (b.track ?? 0)).map((item) => {
+                        const isEditing = editingTrackId === item.id;
+                        return isEditing ? (
+                          <TableRow key={item.id}>
+                            <TableCell>
+                              <Input type="number" value={editTrackFields.track === "" ? "" : String(editTrackFields.track)}
+                                onChange={e => setEditTrackFields(p => ({ ...p, track: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '60px' }} />
+                            </TableCell>
+                            <TableCell>
+                              <select value={editTrackFields.geometry} onChange={e => setEditTrackFields(p => ({ ...p, geometry: e.target.value }))} style={{ padding: '4px' }}>
+                                <option value="line">line</option>
+                                <option value="point">point</option>
+                                <option value="polygon">polygon</option>
+                              </select>
+                            </TableCell>
+                            <TableCell>
+                              <Input type="number" value={editTrackFields.ft2 === "" ? "" : String(editTrackFields.ft2)}
+                                onChange={e => setEditTrackFields(p => ({ ...p, ft2: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '70px' }} />
+                            </TableCell>
+                            <TableCell>
+                              <Input type="number" value={editTrackFields.yd2 === "" ? "" : String(editTrackFields.yd2)}
+                                onChange={e => setEditTrackFields(p => ({ ...p, yd2: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '70px' }} />
+                            </TableCell>
+                            <TableCell>
+                              <Input type="number" value={editTrackFields.unitprice === "" ? "" : String(editTrackFields.unitprice)}
+                                onChange={e => setEditTrackFields(p => ({ ...p, unitprice: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '80px' }} />
+                            </TableCell>
+                            <TableCell>
+                              <Input type="number" value={editTrackFields.quan === "" ? "" : String(editTrackFields.quan)}
+                                onChange={e => setEditTrackFields(p => ({ ...p, quan: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '70px' }} />
+                            </TableCell>
+                            <TableCell>
+                              <Input type="number" value={editTrackFields.value === "" ? "" : String(editTrackFields.value)}
+                                onChange={e => setEditTrackFields(p => ({ ...p, value: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '70px' }} />
+                            </TableCell>
+                            <TableCell>
+                              <Input type="number" value={editTrackFields.numpoint === "" ? "" : String(editTrackFields.numpoint)}
+                                onChange={e => setEditTrackFields(p => ({ ...p, numpoint: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '70px' }} />
+                            </TableCell>
+                            <TableCell>
+                              <input type="checkbox" checked={editTrackFields.trip} onChange={e => setEditTrackFields(p => ({ ...p, trip: e.target.checked }))} />
+                            </TableCell>
+                            <TableCell>
+                              <input type="checkbox" checked={editTrackFields.cost} onChange={e => setEditTrackFields(p => ({ ...p, cost: e.target.checked }))} />
+                            </TableCell>
+                            <TableCell>
+                              <button onClick={() => saveTrackInfo(item.id)} style={{ backgroundColor: 'green', color: 'white', border: 'none', padding: '4px 8px', cursor: 'pointer', marginRight: '4px' }}>Save</button>
+                              <button onClick={() => setEditingTrackId(null)} style={{ border: 'none', padding: '4px 8px', cursor: 'pointer' }}>Cancel</button>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          <TableRow key={item.id}>
+                            <TableCell>{item.track}</TableCell>
+                            <TableCell>{item.geometry}</TableCell>
+                            <TableCell>{item.ft2 ?? ''}</TableCell>
+                            <TableCell>{item.yd2 ?? ''}</TableCell>
+                            <TableCell>{item.unitprice ?? ''}</TableCell>
+                            <TableCell>{item.quan ?? ''}</TableCell>
+                            <TableCell>{item.value ?? ''}</TableCell>
+                            <TableCell>{item.numpoint ?? ''}</TableCell>
+                            <TableCell>{item.trip ? '✓' : ''}</TableCell>
+                            <TableCell>{item.cost ? '✓' : ''}</TableCell>
+                            <TableCell>
+                              <button onClick={() => {
+                                setEditingTrackId(item.id);
+                                setEditTrackFields({
+                                  track: item.track ?? "",
+                                  geometry: item.geometry ?? "line",
+                                  ft2: item.ft2 ?? "",
+                                  yd2: item.yd2 ?? "",
+                                  unitprice: item.unitprice ?? "",
+                                  quan: item.quan ?? "",
+                                  value: item.value ?? "",
+                                  numpoint: item.numpoint ?? "",
+                                  trip: item.trip ?? false,
+                                  cost: item.cost ?? false,
+                                });
+                              }} style={{ backgroundColor: '#2b6cb0', color: 'white', border: 'none', padding: '4px 8px', cursor: 'pointer', marginRight: '4px' }}>Edit</button>
+                              <button onClick={() => { if (window.confirm(`Delete track ${item.track} record?`)) client.models.Track.delete({ id: item.id }); }} style={{ backgroundColor: 'red', color: 'white', border: 'none', padding: '4px 8px', cursor: 'pointer' }}>Delete</button>
                             </TableCell>
                           </TableRow>
                         );
