@@ -1,5 +1,5 @@
 import type { ChangeEvent, SyntheticEvent } from "react";
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import type { Schema } from "../amplify/data/resource";
 import { checkLoginAndGetName } from "./utils/AuthUtils";
 import { useAuthenticator } from '@aws-amplify/ui-react';
@@ -67,6 +67,7 @@ import {
 
 //import type { WaterFeatureProperties } from './types';
 import './FeaturePopup.css';
+import { TRACK_DATA } from './trackData';
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string;
 
 const client = generateClient<Schema>();
@@ -122,11 +123,6 @@ const theme: Theme = {
 };
 
 
-
-type SelectOption = {
-  value: string;
-  label: string;
-};
 
 
 
@@ -213,6 +209,7 @@ function App() {
   const [editDate, setEditDate] = useState<string>('');
 
   const [dateInfoList, setDateInfoList] = useState<DateItem[]>([]);
+  const dateInfoListRef = useRef<DateItem[]>([]);
   const [diWeather, setDiWeather] = useState("");
   const [diHight, setDiHight] = useState<number | "">("");
   const [diLowt, setDiLowt] = useState<number | "">("");
@@ -249,44 +246,7 @@ function App() {
 
 
 
-  const options: SelectOption[] = [
-    { value: 'reuse', label: 'Reuse' },
-    { value: 'water', label: 'Water' },
-    { value: 'wastewater', label: 'Wastewater' },
-    { value: 'stormwater', label: 'Stormwater' },
-    { value: 'pavement', label: 'Pavement' },
-    { value: "F&I, Type 'F' Curb and Gutter", label: "F&I, Type 'F' Curb and Gutter" },
-    { value: "F&I, Type 'E' Curb and Gutter", label: "F&I, Type 'E' Curb and Gutter" },
-    { value: "F&I, Type 'D' Curb", label: "F&I, Type 'D' Curb" },
-    { value: 'Remove and Replace Existing Guard Rail', label: 'Remove and Replace Existing Guard Rail' },
-    { value: 'Remove and Replace Existing Chain Link Fence', label: 'Remove and Replace Existing Chain Link Fence' },
-    { value: 'Remove and Replace Existing Aluminum Fence', label: 'Remove and Replace Existing Aluminum Fence' },
-    { value: 'F&I, Stabilized Subgrade', label: 'F&I, Stabilized Subgrade' },
-    { value: 'F&I, Limerock Base', label: 'F&I, Limerock Base' },
-    { value: 'F&I, Asphalt Pavement Restoration', label: 'F&I, Asphalt Pavement Restoration' },
-    { value: 'Mill and Resurface Asphalt Pavement', label: 'Mill and Resurface Asphalt Pavement' },
-    { value: 'Remove and Replace Asphalt Driveway', label: 'Remove and Replace Asphalt Driveway' },
-    { value: 'F&I, Asphalt Walkway', label: 'F&I, Asphalt Walkway' },
-    { value: 'F&I, Concrete Median', label: 'F&I, Concrete Median' },
-    { value: 'F&I, 6 inch Concrete Sidewalk', label: 'F&I, 6 inch Concrete Sidewalk' },
-    { value: 'Remove and Replace Concrete Driveway', label: 'Remove and Replace Concrete Driveway' },
-    { value: 'Remove and Replace Paver Driveway', label: 'Remove and Replace Paver Driveway' },
-    { value: 'F&I, Paver Walkway', label: 'F&I, Paver Walkway' },
-    { value: 'F&I, Concrete Golf Cart Path', label: 'F&I, Concrete Golf Cart Path' },
-    { value: 'F&I, Concrete Golf Cart Path with Rolled Curb', label: 'F&I, Concrete Golf Cart Path with Rolled Curb' },
-    { value: 'Restoration of Green Areas', label: 'Restoration of Green Areas' },
-    { value: 'Existing Minor Utility Adjustment', label: 'Existing Minor Utility Adjustment' },
-    { value: 'Existing Major Utility Adjustment', label: 'Existing Major Utility Adjustment' },
-    { value: 'Remove and Replace Existing Road Sign & Post Assembly', label: 'Remove and Replace Existing Road Sign & Post Assembly' },
-    { value: 'Remove and Replace Existing Mailbox', label: 'Remove and Replace Existing Mailbox' },
-    { value: 'Restoration of Golf Course', label: 'Restoration of Golf Course' },
-    { value: 'Removal and Replacement of Unsuitable Material', label: 'Removal and Replacement of Unsuitable Material' },
-    { value: 'Replace Existing Potable Water Service', label: 'Replace Existing Potable Water Service' },
-    { value: 'Replace Existing Sanitary Sewer Lateral', label: 'Replace Existing Sanitary Sewer Lateral' },
-    { value: 'F&I, Pavement Marking and Striping', label: 'F&I, Pavement Marking and Striping' },
-    { value: 'R&D, Existing Trees', label: 'R&D, Existing Trees' },
-    { value: 'F&I, Florida Number 2 Trees', label: 'F&I, Florida Number 2 Trees' },
-  ];
+  const options = TRACK_DATA.map(r => ({ value: r.type, label: r.type, geometry: r.geometry }));
 
   //console.log(AIR_PORTS);
 
@@ -294,8 +254,17 @@ function App() {
   const handleDate = (e: ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.value;
     setDate(selected);
-    if (selected && !dateInfoList.some(item => item.date === selected)) {
+    if (selected && !dateInfoListRef.current.some(item => item.date === selected)) {
       client.models.Date.create({ date: selected });
+      setDiWeather("");
+      setDiHight("");
+      setDiLowt("");
+      setDiSupervisor("");
+      setDiLabor("");
+      setDiObservation("");
+      setDiRemark("");
+      setDiComment("");
+      setDiEquipment("");
     }
   };
 
@@ -304,13 +273,29 @@ function App() {
   };
 
   const handleTrack = (e: ChangeEvent<HTMLInputElement>) => {
-    setTrack(parseInt(e.target.value));
+    const val = parseInt(e.target.value);
+    setTrack(val);
+    if (!isNaN(val) && !trackInfoList.some(item => item.track === val)) {
+      client.models.Track.create({ track: val });
+      setNewTrack({ track: "", geometry: "line", ft2: "", yd2: "", unitprice: "", quan: "", value: "", numpoint: "", trip: false, cost: false });
+    }
   };
 
   const handleSelectChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const value = event.target.value;
-    //console.log(value);
     setType(value);
+    if (date && !dateInfoListRef.current.some(item => item.date === date)) {
+      client.models.Date.create({ date });
+      setDiWeather("");
+      setDiHight("");
+      setDiLowt("");
+      setDiSupervisor("");
+      setDiLabor("");
+      setDiObservation("");
+      setDiRemark("");
+      setDiComment("");
+      setDiEquipment("");
+    }
   }
 
   const handleDiameter = (e: ChangeEvent<HTMLInputElement>) => {
@@ -349,7 +334,7 @@ function App() {
     const sub = client.models.Date.observeQuery({
       selectionSet: [...dateSelectionSet],
     }).subscribe({
-      next: (data) => setDateInfoList([...data.items]),
+      next: (data) => { const items = [...data.items]; dateInfoListRef.current = items; setDateInfoList(items); },
       error: (err) => console.error('Date observeQuery error:', err),
     });
     return () => sub.unsubscribe();
@@ -378,18 +363,15 @@ function App() {
 
 
 
-  function createLocation() {
+  async function createLocation() {
     if (!date) {
       alert("Please select a date before adding a new record.");
       return;
     }
 
     handleUserName();
-    //console.log(typeof userName);
-    //console.log("Username:", userName);
-    const name = userName
-    //console.log(name);
-    client.models.Location.create({
+    const name = userName;
+    await client.models.Location.create({
       date: date,
       time: time,
       track: track,
@@ -398,16 +380,24 @@ function App() {
       length: calResult !== null ? calResult : length,
       username: name,
       description: description,
-
-
       lat: lat,
       lng: lng,
       joint: joint,
-
     });
 
     if (!trackInfoList.some(t => t.track === track)) {
       client.models.Track.create({ track });
+    }
+    console.log('[createLocation] date value:', date);
+    const { data: existingDates, errors: listErrors } = await client.models.Date.list({ filter: { date: { eq: date } } });
+    console.log('[createLocation] existingDates:', existingDates, 'listErrors:', listErrors);
+    if (!existingDates || existingDates.length === 0) {
+      console.log('[createLocation] creating Date record for:', date);
+      const { data: created, errors } = await client.models.Date.create({ date });
+      console.log('[createLocation] Date.create result:', created, 'errors:', errors);
+      if (errors) console.error('Date.create errors:', JSON.stringify(errors, null, 2));
+    } else {
+      console.log('[createLocation] Date already exists, skipping create');
     }
     setDate("");
     setTime("");
@@ -581,6 +571,10 @@ function App() {
       console.log('Updating via GraphQL:', input);
       const result = await (client as any).graphql({ query: mutation, variables: { input } });
       console.log('Update result:', result);
+
+      if (editDate && !dateInfoListRef.current.some(item => item.date === editDate)) {
+        client.models.Date.create({ date: editDate });
+      }
 
       // Manually patch local state so the UI reflects the change immediately,
       // independent of the observeQuery subscription which can crash on custom types.
@@ -914,28 +908,11 @@ function App() {
         //width="100%"
         >
           {options.map((option) => {
-            const greenValues = [
-              'reuse','water','wastewater','stormwater','pavement',
-              "F&I, Type 'F' Curb and Gutter","F&I, Type 'E' Curb and Gutter",
-              "F&I, Type 'D' Curb",
-              'Remove and Replace Existing Guard Rail',
-              'Remove and Replace Existing Chain Link Fence',
-              'Remove and Replace Existing Aluminum Fence',
-            ];
-            const blueValues = [
-              'F&I, Stabilized Subgrade','F&I, Limerock Base',
-              'F&I, Asphalt Pavement Restoration','Mill and Resurface Asphalt Pavement',
-              'Remove and Replace Asphalt Driveway','F&I, Asphalt Walkway',
-              'F&I, Concrete Median','F&I, 6 inch Concrete Sidewalk',
-              'Remove and Replace Concrete Driveway','Remove and Replace Paver Driveway',
-              'F&I, Paver Walkway','F&I, Concrete Golf Cart Path',
-              'F&I, Concrete Golf Cart Path with Rolled Curb','Restoration of Green Areas',
-            ];
-            const color = greenValues.includes(option.value) ? 'darkgreen'
-              : blueValues.includes(option.value) ? 'darkblue' : undefined;
+            const color = option.geometry === 'line' ? 'darkgreen'
+              : option.geometry === 'polygon' ? 'darkblue' : 'dimgrey';
             return (
               <option key={option.value} value={option.value}
-                style={color ? { color } : undefined}>
+                style={{ color, fontWeight: 'bold' }}>
                 {option.label}
               </option>
             );
