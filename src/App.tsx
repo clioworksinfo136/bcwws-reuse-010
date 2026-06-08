@@ -88,7 +88,7 @@ type DateItem = SelectionSet<Schema['Date']['type'], typeof dateSelectionSet>;
 
 const trackInfoSelectionSet = [
   'id', 'track', 'geometry', 'ft2', 'yd2', 'unitprice',
-  'quan', 'value', 'numpoint', 'trip', 'cost', 'createdAt', 'updatedAt',
+  'quan', 'value', 'numpoint', 'trip', 'cost', 'unit', 'lastdate', 'createdAt', 'updatedAt',
 ] as const;
 type TrackInfoItem = SelectionSet<Schema['Track']['type'], typeof trackInfoSelectionSet>;
 
@@ -738,6 +738,7 @@ function App() {
             id: trackRec.id,
             ...(match.unitprice != null && { unitprice: match.unitprice }),
             ...(match.geometry   != null && { geometry:  match.geometry  }),
+            ...(match.unit       != null && { unit:      match.unit       }),
           });
         }
       }
@@ -1622,6 +1623,7 @@ function App() {
                         <TableCell as="th">ft²</TableCell>
                         <TableCell as="th">yd²</TableCell>
                         <TableCell as="th">Unit Price</TableCell>
+                        <TableCell as="th">Unit</TableCell>
                         <TableCell as="th">Quantity</TableCell>
                         <TableCell as="th">Value</TableCell>
                         <TableCell as="th">Num Points</TableCell>
@@ -1735,6 +1737,7 @@ function App() {
                             <TableCell>{item.ft2 ?? ''}</TableCell>
                             <TableCell>{item.yd2 ?? ''}</TableCell>
                             <TableCell>{item.unitprice ?? ''}</TableCell>
+                            <TableCell>{item.unit ?? ''}</TableCell>
                             <TableCell>{item.quan ?? ''}</TableCell>
                             <TableCell>{item.value ?? ''}</TableCell>
                             <TableCell>{item.numpoint ?? ''}</TableCell>
