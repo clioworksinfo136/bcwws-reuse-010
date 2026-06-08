@@ -19,6 +19,8 @@ export const TRACK_DATA: TrackRow[] = [
   { id: '#0-45', type: '#0-45:24" DI Pipe', geometry: 'line', unitprice: 437.00, color: 'purple', unit: "Linear Foot"},
   { id: '#0-46', type: '#0-46:30" DI Pipe', geometry: 'line', unitprice: 658.00, color: 'purple', unit: "Linear Foot"},
   { id: '#0-1', type: '#0-1:Bonds and Insurance', geometry: 'point', unitprice: 718250.00, color: 'black', unit: "Lump Sum" },
+  { id: '#0-7', type: '#0-7: 24 inch Plug Valve', geometry: 'point', unitprice: 59867.00, color: 'purple', unit: "Each"},
+  { id: '#0-8', type: '#0-8: 30 inch Plug Valve', geometry: 'point', unitprice: 90045.00, color: 'purple', unit: "Each"},
   { id: '#0-9', type: '#0-9: Valve Connection', geometry: 'point', unitprice: 14808.00, color: 'purple', unit: "Each"},
   { id: '#0-10', type: '#0-10: NRWWTP Connection', geometry: 'point', unitprice: 229369.00, color: 'purple', unit: "Lump Sum" },
   { id: '#0-11', type: '#0-11: 30 inch Line Stop', geometry: 'point', unitprice: 106061.00, color: 'purple', unit: "Each" },

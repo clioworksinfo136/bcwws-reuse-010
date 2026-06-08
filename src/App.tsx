@@ -641,7 +641,7 @@ function App() {
       observation: editDateFields.observation || undefined,
       remark: editDateFields.remark || undefined,
       comment: editDateFields.comment || undefined,
-      equipment: editDateFields.equipment || undefined,
+      equipment: editDateFields.equipment || null,
     });
     setEditingDateId(null);
   }
@@ -884,21 +884,21 @@ function App() {
           value={date}
           placeholder="date"
           onChange={handleDate}
-        //width="150%"
+        width="80px"
         />
         <input
           type="time"
           value={time}
           placeholder="time"
           onChange={handleTime}
-        //width="150%"
+          style={{ width: '80px' }}
         />
         <input
           type="number"
           value={track}
           placeholder="track"
           onChange={handleTrack}
-        //width="150%"
+          style={{ width: '50px' }}
         />
         <SelectField
           label="Select an option"
@@ -920,33 +920,23 @@ function App() {
         </SelectField>
 
 
-        <input
-          type="number"
-          value={diameter}
-          placeholder="diameter (in)"
-          onChange={handleDiameter}
-        //width="150%"
-        />
   
         <Input
           type="text"
           value={description}
           placeholder="description"
           onChange={handleDescription}
-          width="800px"
+          style={{ width: '600px' }}
         />
         <select
           value={joint}
           onChange={e => setJoint(e.target.value)}
         >
           <option value="joint">Joint</option>
-          <option value="90-bend">90-Bend</option>
-          <option value="45-bend">45-Bend</option>
-          <option value="22.5-bend">22.5-Bend</option>
+          <option value="#0-6 24 in 90-bend">90-Bend</option>
+          <option value="#0-6 24 in 45-bend">45-Bend</option>
+          <option value="#0-6 24 in 22.5-bend">22.5-Bend</option>
           <option value="11.25-bend">11.25-Bend</option>
-          <option value="24-plug-valve">24-Plug Valve</option>
-          <option value="30-plug-valve">30-Plug Valve</option>
-          <option value="30-line-stop">30 Line Stop</option>
         </select>
         <label style={{ display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap', cursor: 'pointer' }}>
           <input
@@ -1171,18 +1161,6 @@ function App() {
                               </td>
                             </tr>
                             <tr>
-                              <td>Diameter</td>
-                              <td>
-                                <input
-                                  aria-label="Diameter"
-                                  type="number"
-                                  value={editDiameter}
-                                  onChange={e => setEditDiameter(e.target.value)}
-                                  style={{ fontSize: '11px', padding: '2px 4px', width: '100%' }}
-                                />
-                              </td>
-                            </tr>
-                            <tr>
                               <td>Description</td>
                               <td>
                                 <input
@@ -1351,7 +1329,6 @@ function App() {
                         <TableCell as="th" /* style={{ width: '10%' }} */>Track</TableCell>
                         <TableCell as="th" /* style={{ width: '15%' }} */>Type</TableCell>
                         <TableCell as="th" /* style={{ width: '15%' }} */>User</TableCell>
-                        <TableCell as="th" /* style={{ width: '15%' }} */>Diameter</TableCell>
                         <TableCell as="th" /* style={{ width: '15%' }} */>Length</TableCell>
                         <TableCell as="th" /* style={{ width: '15%' }} */>Images</TableCell>
                         <TableCell as="th" /* style={{ width: '15%' }} */>Latitude</TableCell>
@@ -1386,7 +1363,6 @@ function App() {
                           <TableCell /* width="10%" */>{location.track}</TableCell>
                           <TableCell /* width="15%" */>{location.type}</TableCell>
                           <TableCell /* width="15%" */>{location.username}</TableCell>
-                          <TableCell /* width="15%" */>{location.diameter}</TableCell>
                           <TableCell /* width="15%" */>{location.length != null ? Math.round(Number(location.length)) : ''}</TableCell>
                           <TableCell /* width="15%" */>{location.photos ? location.photos.length : 0}</TableCell>
                           <TableCell /* width="15%" */>{location.lat != null ? Number(location.lat).toFixed(6) : ''}</TableCell>
@@ -1429,6 +1405,29 @@ function App() {
                         <TableCell as="th">Remark</TableCell>
                         <TableCell as="th">Comment</TableCell>
                         <TableCell as="th">Equipment</TableCell>
+                        <TableCell as="th">
+                          <select onChange={e => { if (e.target.value) { setDiEquipment(prev => prev ? prev + ', ' + e.target.value : e.target.value); e.target.value = ''; } }} style={{ fontSize: '11px', padding: '2px' }}>
+                            <option value="">+List</option>
+                            <option>Loader</option>
+                            <option>Excavator</option>
+                            <option>Bobcat</option>
+                            <option>Broom Tractor</option>
+                            <option>Combination</option>
+                            <option>Vibratory Roller</option>
+                            <option>Pneumatic Roller</option>
+                            <option>Grader</option>
+                            <option>Mini Grader</option>
+                            <option>Asphalt / Dump Truck</option>
+                            <option>Milling Machine</option>
+                            <option>Asphalt Paver</option>
+                            <option>HDD Machine</option>
+                            <option>Trencher</option>
+                            <option>Crane</option>
+                            <option>Sled Tamp</option>
+                            <option>Dozer</option>
+                          </select>
+                          <button onClick={() => setDiEquipment("")} style={{ fontSize: '11px', padding: '2px 6px', marginLeft: '4px', backgroundColor: 'blue', color: 'white', border: 'none', cursor: 'pointer' }}>Clear</button>
+                        </TableCell>
                         <TableCell as="th"></TableCell>
                       </TableRow>
                     </TableHead>
@@ -1523,6 +1522,27 @@ function App() {
                             <TableCell>
                               <input type="text" value={ef.equipment}
                                 onChange={e => setEf('equipment', e.target.value)} style={{ width: '100%' }} />
+                              <select onChange={e => { if (e.target.value) { setEf('equipment', (ef.equipment ? ef.equipment + ', ' : '') + e.target.value); e.target.value = ''; } }} style={{ fontSize: '11px', padding: '2px', marginTop: '2px' }}>
+                                <option value="">+List</option>
+                                <option>Loader</option>
+                                <option>Excavator</option>
+                                <option>Bobcat</option>
+                                <option>Broom Tractor</option>
+                                <option>Combination</option>
+                                <option>Vibratory Roller</option>
+                                <option>Pneumatic Roller</option>
+                                <option>Grader</option>
+                                <option>Mini Grader</option>
+                                <option>Asphalt / Dump Truck</option>
+                                <option>Milling Machine</option>
+                                <option>Asphalt Paver</option>
+                                <option>HDD Machine</option>
+                                <option>Trencher</option>
+                                <option>Crane</option>
+                                <option>Sled Tamp</option>
+                                <option>Dozer</option>
+                              </select>
+                              <button onClick={() => setEf('equipment', '')} style={{ fontSize: '11px', padding: '2px 6px', marginLeft: '4px', backgroundColor: 'blue', color: 'white', border: 'none', cursor: 'pointer' }}>Clear</button>
                             </TableCell>
                             <TableCell>
                               <button onClick={() => saveDateInfo(item.id)} style={{ marginRight: 4, backgroundColor: 'green', color: 'white', border: 'none', padding: '4px 10px', cursor: 'pointer' }}>Save</button>

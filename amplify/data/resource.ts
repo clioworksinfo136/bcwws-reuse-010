@@ -47,6 +47,12 @@ const schema = a.schema({
       locations: a.hasMany('Location', 'trackId'),
     })
     .authorization((allow) => [allow.publicApiKey()]),
+  Valve: a
+    .model({
+      valve: a.string(),
+      number: a.integer(),
+    })
+    .authorization((allow) => [allow.publicApiKey()]),
   Date: a
     .model({
       date: a.date(),
