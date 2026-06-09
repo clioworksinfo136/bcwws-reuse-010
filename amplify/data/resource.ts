@@ -47,6 +47,7 @@ const schema = a.schema({
       unit: a.string(),
       lastdate: a.string(),
       color: a.string(),
+      type: a.string(),
       locations: a.hasMany('Location', 'trackId'),
     })
     .authorization((allow) => [allow.publicApiKey()]),
