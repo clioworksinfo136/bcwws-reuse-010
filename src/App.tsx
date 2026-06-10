@@ -89,7 +89,7 @@ type DateItem = SelectionSet<Schema['Date']['type'], typeof dateSelectionSet>;
 
 const trackInfoSelectionSet = [
   'id', 'track', 'geometry', 'ft2', 'yd2', 'unitprice',
-  'quan', 'value', 'numpoint', 'trip', 'cost', 'unit', 'lastdate', 'color', 'type', 'createdAt', 'updatedAt',
+  'quan', 'value', 'numpoint', 'trip', 'cost', 'unit', 'lastdate', 'color', 'type', 'typeid1', 'typeid', 'createdAt', 'updatedAt',
 ] as const;
 type TrackInfoItem = SelectionSet<Schema['Track']['type'], typeof trackInfoSelectionSet>;
 
@@ -250,6 +250,43 @@ function App() {
       },
     })),
   }), [locationGeoJSON, typeColorMap]);
+  const typeInfo1Rows = useMemo(() => {
+    const groups: Record<string, { typeid1: string; type: string | null; unitprice: number | null; unit: string | null; quan: number; value: number }> = {};
+    for (const t of trackInfoList) {
+      if (!t.typeid1) continue;
+      const g = groups[t.typeid1] ??= { typeid1: t.typeid1, type: null, unitprice: null, unit: null, quan: 0, value: 0 };
+      if (g.type == null && t.type != null) g.type = t.type;
+      if (g.unitprice == null && t.unitprice != null) g.unitprice = t.unitprice;
+      if (g.unit == null && t.unit != null) g.unit = t.unit;
+      g.quan += t.quan ?? 0;
+      g.value += t.value ?? 0;
+    }
+    // Resolve type/unitprice/unit from trackData.ts (source of truth) so stale Track rows don't show outdated values
+    for (const g of Object.values(groups)) {
+      const ref = TRACK_DATA.find(r => r.typeid1 === g.typeid1);
+      if (ref) {
+        g.type = ref.type;
+        g.unitprice = ref.unitprice;
+        g.unit = ref.unit;
+      }
+    }
+    return Object.values(groups).sort((a, b) => a.typeid1.localeCompare(b.typeid1, undefined, { numeric: true }));
+  }, [trackInfoList]);
+
+  const typeInfo2Rows = useMemo(() => {
+    const groups: Record<string, { typeid: string; type: string | null; unitprice: number | null; unit: string | null; quan: number; value: number }> = {};
+    for (const t of trackInfoList) {
+      if (!t.typeid) continue;
+      const g = groups[t.typeid] ??= { typeid: t.typeid, type: null, unitprice: null, unit: null, quan: 0, value: 0 };
+      if (g.type == null && t.type != null) g.type = t.type;
+      if (g.unitprice == null && t.unitprice != null) g.unitprice = t.unitprice;
+      if (g.unit == null && t.unit != null) g.unit = t.unit;
+      g.quan += t.quan ?? 0;
+      g.value += t.value ?? 0;
+    }
+    return Object.values(groups).sort((a, b) => a.typeid.localeCompare(b.typeid, undefined, { numeric: true }));
+  }, [trackInfoList]);
+
   const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
   const [editTrackFields, setEditTrackFields] = useState({
     track: "" as number | "", geometry: "line",
@@ -825,7 +862,18 @@ function App() {
         ...(match?.unit      != null && { unit:      match.unit      }),
         ...(match?.color     != null && { color:     match.color     }),
         ...(match?.type      != null && { type:      match.type      }),
+        ...(match?.typeid1   != null && { typeid1:   match.typeid1   }),
+        ...(match?.typeid    != null && { typeid:    match.typeid    }),
       });
+    }
+
+    // Remove Track records whose track number no longer exists in Location
+    flushSync(() => setComputeStatus(prev => [...prev, "Removing Track rows with no matching Location..."]));
+    const usedTracks = new Set(location.map(l => l.track));
+    for (const trackRec of sorted) {
+      if (trackRec.track == null || !usedTracks.has(trackRec.track)) {
+        await client.models.Track.delete({ id: trackRec.id });
+      }
     }
 
     // Re-fetch fresh track data after Pass 0 so geometry/unitprice updates are reflected
@@ -982,7 +1030,7 @@ function App() {
       <h1>BCWWS REGIONAL EFFLUENT AND REUSE SOLUTIONS - EFFLUENT WATER TRANSMISSION MAIN</h1>
       <Divider orientation="horizontal" />
       <br />
-      <Flex>
+      <Flex alignItems="flex-start">
         <Button onClick={signOut} width={120}>
           Sign out
         </Button>
@@ -1889,6 +1937,121 @@ function App() {
                           </TableRow>
                         );
                       })}
+                    </TableBody>
+                  </Table>
+                </ThemeProvider>
+              </ScrollView>
+            </>)
+          }, {
+            label: "Type Info 1",
+            value: "5",
+            content: (<>
+              <ScrollView
+                as="div"
+                ariaLabel="Type Info 1"
+                backgroundColor="var(--amplify-colors-white)"
+                borderRadius="6px"
+                color="var(--amplify-colors-blue-60)"
+                padding="1rem"
+                height="700px"
+              >
+                <ThemeProvider theme={theme} colorMode="light">
+                  <Table caption="" highlightOnHover={false} variation="striped"
+                    style={{ width: '100%', fontFamily: 'Arial, sans-serif' }}>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell as="th">#</TableCell>
+                        <TableCell as="th">Items</TableCell>
+                        <TableCell as="th">Unit Price ($/unit)</TableCell>
+                        <TableCell as="th">Unit</TableCell>
+                        <TableCell as="th">Quantity</TableCell>
+                        <TableCell as="th">Cost</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {(() => {
+                        const isFittingRow = (id: string) => /^#0-6-[1-8]$/.test(id);
+                        const fittingRows = typeInfo1Rows.filter(r => isFittingRow(r.typeid1));
+                        const lastFittingId = fittingRows.at(-1)?.typeid1;
+                        const subQuan = fittingRows.reduce((s, r) => s + r.quan, 0);
+                        const subValue = fittingRows.reduce((s, r) => s + r.value, 0);
+                        return typeInfo1Rows.flatMap(row => {
+                          const cells = (
+                            <TableRow key={row.typeid1}>
+                              <TableCell>{row.typeid1}</TableCell>
+                              <TableCell>{row.type ?? ''}</TableCell>
+                              <TableCell>{row.unitprice != null ? '$' + row.unitprice.toLocaleString('en-US') : ''}</TableCell>
+                              <TableCell>{row.unit ?? ''}</TableCell>
+                              <TableCell>{Math.round(row.quan).toLocaleString('en-US')}</TableCell>
+                              <TableCell>{'$' + Math.round(row.value).toLocaleString('en-US')}</TableCell>
+                            </TableRow>
+                          );
+                          if (row.typeid1 === lastFittingId) {
+                            return [cells, (
+                              <TableRow key="subtotal-0-6" style={{ fontWeight: 'bold' }}>
+                                <TableCell>F&I, DIP Compact Fittings</TableCell>
+                                <TableCell></TableCell>
+                                <TableCell></TableCell>
+                                <TableCell></TableCell>
+                                <TableCell>{Math.round(subQuan).toLocaleString('en-US')}</TableCell>
+                                <TableCell>{'$' + Math.round(subValue).toLocaleString('en-US')}</TableCell>
+                              </TableRow>
+                            )];
+                          }
+                          return [cells];
+                        }).concat([
+                          <TableRow key="total" style={{ fontWeight: 'bold' }}>
+                            <TableCell>Total</TableCell>
+                            <TableCell></TableCell>
+                            <TableCell></TableCell>
+                            <TableCell></TableCell>
+                            <TableCell></TableCell>
+                            <TableCell>{'$' + Math.round(typeInfo1Rows.reduce((s, r) => s + r.value, 0)).toLocaleString('en-US')}</TableCell>
+                          </TableRow>
+                        ]);
+                      })()}
+                    </TableBody>
+                  </Table>
+                </ThemeProvider>
+              </ScrollView>
+            </>)
+          }, {
+            label: "Type Info 2",
+            value: "6",
+            content: (<>
+              <ScrollView
+                as="div"
+                ariaLabel="Type Info 2"
+                backgroundColor="var(--amplify-colors-white)"
+                borderRadius="6px"
+                color="var(--amplify-colors-blue-60)"
+                padding="1rem"
+                height="700px"
+              >
+                <ThemeProvider theme={theme} colorMode="light">
+                  <Table caption="" highlightOnHover={false} variation="striped"
+                    style={{ width: '100%', fontFamily: 'Arial, sans-serif' }}>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell as="th">Type ID</TableCell>
+                        <TableCell as="th">Type</TableCell>
+                        <TableCell as="th">Unit Price ($/unit)</TableCell>
+                        <TableCell as="th">Unit</TableCell>
+                        <TableCell as="th">Quantity</TableCell>
+                        <TableCell as="th">Value</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {typeInfo2Rows.map(row => (
+                        <TableRow key={row.typeid}>
+                          <TableCell>{row.typeid}</TableCell>
+                          <TableCell>{row.typeid === '#0-6' ? 'F&I, DIP Compact Fittings' : row.type ?? ''}</TableCell>
+                          <TableCell>{row.unitprice != null ? '$' + row.unitprice.toLocaleString('en-US') : ''}</TableCell>
+                          <TableCell>{row.unit ?? ''}</TableCell>
+                          <TableCell>{Math.round(row.quan).toLocaleString('en-US')}</TableCell>
+                          <TableCell>{'$' + Math.round(row.value).toLocaleString('en-US')}</TableCell>
+                        </TableRow>
+                      ))}
                     </TableBody>
                   </Table>
                 </ThemeProvider>
