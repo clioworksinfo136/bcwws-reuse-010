@@ -259,6 +259,35 @@ function App() {
       },
     })),
   }), [locationGeoJSON, trackGeometryMap]);
+  const [historySort, setHistorySort] = useState<{ key: 'date' | 'track' | 'type' | 'images'; dir: 1 | -1 } | null>(null);
+
+  const sortedHistory = useMemo(() => {
+    const rows = [...location];
+    if (!historySort) {
+      // Default: track ascending, then date+time descending
+      return rows.sort((a, b) => {
+        const trackDiff = (a.track ?? 0) - (b.track ?? 0);
+        if (trackDiff !== 0) return trackDiff;
+        return `${b.date ?? ''}T${b.time ?? ''}`.localeCompare(`${a.date ?? ''}T${a.time ?? ''}`);
+      });
+    }
+    const { key, dir } = historySort;
+    return rows.sort((a, b) => {
+      let cmp = 0;
+      if (key === 'date')   cmp = `${a.date ?? ''}T${a.time ?? ''}`.localeCompare(`${b.date ?? ''}T${b.time ?? ''}`);
+      if (key === 'track')  cmp = (a.track ?? 0) - (b.track ?? 0);
+      if (key === 'type')   cmp = (a.type ?? '').localeCompare(b.type ?? '');
+      if (key === 'images') cmp = (a.photos?.length ?? 0) - (b.photos?.length ?? 0);
+      return cmp * dir;
+    });
+  }, [location, historySort]);
+
+  const toggleHistorySort = (key: 'date' | 'track' | 'type' | 'images') =>
+    setHistorySort(prev => prev?.key === key ? { key, dir: prev.dir === 1 ? -1 : 1 } : { key, dir: 1 });
+
+  const historySortArrow = (key: string) =>
+    historySort?.key === key ? (historySort.dir === 1 ? ' ▲' : ' ▼') : '';
+
   const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
   const [editTrackFields, setEditTrackFields] = useState({
     track: "" as number | "", geometry: "line",
@@ -1651,25 +1680,19 @@ function App() {
                     }}>
                     <TableHead>
                       <TableRow>
-                        <TableCell as="th" /* style={{ width: '15%' }} */>Date</TableCell>
+                        <TableCell as="th" onClick={() => toggleHistorySort('date')} style={{ cursor: 'pointer', userSelect: 'none' }}>Date{historySortArrow('date')}</TableCell>
                         <TableCell as="th" /* style={{ width: '15%' }} */>Time</TableCell>
-                        <TableCell as="th" /* style={{ width: '10%' }} */>Track</TableCell>
-                        <TableCell as="th" /* style={{ width: '15%' }} */>Type</TableCell>
+                        <TableCell as="th" onClick={() => toggleHistorySort('track')} style={{ cursor: 'pointer', userSelect: 'none' }}>Track{historySortArrow('track')}</TableCell>
+                        <TableCell as="th" onClick={() => toggleHistorySort('type')} style={{ cursor: 'pointer', userSelect: 'none' }}>Type{historySortArrow('type')}</TableCell>
                         <TableCell as="th" /* style={{ width: '15%' }} */>User</TableCell>
                         <TableCell as="th" /* style={{ width: '15%' }} */>Length</TableCell>
-                        <TableCell as="th" /* style={{ width: '15%' }} */>Images</TableCell>
+                        <TableCell as="th" onClick={() => toggleHistorySort('images')} style={{ cursor: 'pointer', userSelect: 'none' }}>Images{historySortArrow('images')}</TableCell>
                         <TableCell as="th" /* style={{ width: '15%' }} */>Latitude</TableCell>
                         <TableCell as="th" /* style={{ width: '15%' }} */>Longitude</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {[...location].sort((a, b) => {
-                          const trackDiff = (a.track ?? 0) - (b.track ?? 0);
-                          if (trackDiff !== 0) return trackDiff;
-                          const dateA = `${a.date ?? ''}T${a.time ?? ''}`;
-                          const dateB = `${b.date ?? ''}T${b.time ?? ''}`;
-                          return dateB.localeCompare(dateA);
-                        }).map((location) => (
+                      {sortedHistory.map((location) => (
                         <TableRow
                           onDoubleClick={(e) => {
                             console.log("location photos url =", location.photos)
