@@ -1347,7 +1347,7 @@ function App() {
                     id="station-labels"
                     type="symbol"
                     source="station-labels"
-                    source-layer="text-layer"
+                    source-layer="text.zip-kwe786"
                     layout={{
                       'text-field': ['get', 'Text'],
                       'text-size': 10,
