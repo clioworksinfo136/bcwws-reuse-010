@@ -184,7 +184,7 @@ function App() {
   const [time, setTime] = useState("");
   //const [report, setReport] = useState("");
   const [track, setTrack] = useState<number>(0);
-  const [type, setType] = useState<string>("reuse");
+  const [type, setType] = useState<string>(TRACK_DATA[0]?.type ?? "");
   const [diameter, setDiameter] = useState<number>(0);
   const [length, setLength] = useState<number>(0);
   const [userName, setUserName] = useState<string>();
