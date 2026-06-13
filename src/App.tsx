@@ -906,39 +906,6 @@ function App() {
       }).result;
       flushSync(() => setComputeStatus(prev => [...prev, `✓ Saved ${features.length} polygon(s) to Amplify Storage as geojson/polygon.geojson.`]));
 
-      // Export locations on point-geometry tracks as point.geojson
-      const pointTracks = trackInfoList.filter(t => t.geometry === 'point');
-      const pointFeatures = pointTracks.flatMap(trackRec =>
-        location
-          .filter(l => l.track === trackRec.track && l.lat != null && l.lng != null)
-          .map(l => ({
-            type: 'Feature' as const,
-            geometry: { type: 'Point' as const, coordinates: [l.lng!, l.lat!] },
-            properties: {
-              id:        l.id,
-              date:      l.date,
-              time:      l.time,
-              track:     trackRec.track,
-              geometry:  trackRec.geometry,
-              type:      trackRec.type,
-              unitprice: trackRec.unitprice,
-              quan:      trackRec.quan,
-              value:     trackRec.value,
-              numpoint:  trackRec.numpoint,
-              unit:      trackRec.unit,
-              lastdate:  trackRec.lastdate,
-              color:     trackRec.color,
-              cost:      trackRec.cost,
-            },
-          }))
-      );
-      const pointGeojson = { type: 'FeatureCollection' as const, features: pointFeatures };
-      await uploadData({
-        path: 'geojson/point.geojson',
-        data: new Blob([JSON.stringify(pointGeojson, null, 2)], { type: 'application/json' }),
-        options: { contentType: 'application/json' },
-      }).result;
-
       // Export locations on line-geometry tracks as line.geojson (one LineString per track)
       const lineTracks = trackInfoList.filter(t => t.geometry === 'line');
       const lineFeatures = [];
@@ -974,6 +941,10 @@ function App() {
         data: new Blob([JSON.stringify(lineGeojson, null, 2)], { type: 'application/json' }),
         options: { contentType: 'application/json' },
       }).result;
+
+      // Last pass: export point-geometry track locations to point.geojson (same as Export Point button)
+      await exportPointGeojson();
+
       setTimeout(() => setComputeStatus([]), 2000);
     } catch (err) {
       console.error('handleCompletePolygon error:', err);
@@ -981,38 +952,44 @@ function App() {
     }
   }
 
+  // Export point-geometry track locations to geojson/point.geojson.
+  // For each Location, look up the linked Track by track number; keep only point-geometry
+  // tracks. Every Location sharing a track number is exported as its own feature.
+  async function exportPointGeojson(): Promise<number> {
+    const trackByNumber: Record<number, typeof trackInfoList[number]> = {};
+    for (const t of trackInfoList) {
+      if (t.track != null) trackByNumber[t.track] = t;
+    }
+    const pointFeatures = location
+      .filter(l => l.lat != null && l.lng != null && l.track != null)
+      .map(l => ({ l, track: trackByNumber[l.track!] }))
+      .filter(({ track }) => track?.geometry === 'point')
+      .map(({ l, track }) => ({
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: [l.lng!, l.lat!] },
+        properties: {
+          track:     track!.track,
+          typeid:    track!.typeid,
+          type:      track!.type,
+          unit:      track!.unit,
+          unitprice: track!.unitprice,
+          color:     track!.color,
+        },
+      }));
+    const pointGeojson = { type: 'FeatureCollection' as const, features: pointFeatures };
+    await uploadData({
+      path: 'geojson/point.geojson',
+      data: new Blob([JSON.stringify(pointGeojson, null, 2)], { type: 'application/json' }),
+      options: { contentType: 'application/json' },
+    }).result;
+    return pointFeatures.length;
+  }
+
   async function handleExportPoint() {
     try {
       flushSync(() => setComputeStatus(["Export Point: exporting point tracks to point.geojson..."]));
-      // For each Location, look up the linked Track by track number; keep only point-geometry
-      // tracks. Every Location sharing a track number is exported as its own feature.
-      const trackByNumber: Record<number, typeof trackInfoList[number]> = {};
-      for (const t of trackInfoList) {
-        if (t.track != null) trackByNumber[t.track] = t;
-      }
-      const pointFeatures = location
-        .filter(l => l.lat != null && l.lng != null && l.track != null)
-        .map(l => ({ l, track: trackByNumber[l.track!] }))
-        .filter(({ track }) => track?.geometry === 'point')
-        .map(({ l, track }) => ({
-          type: 'Feature' as const,
-          geometry: { type: 'Point' as const, coordinates: [l.lng!, l.lat!] },
-          properties: {
-            track:     track!.track,
-            typeid:    track!.typeid,
-            type:      track!.type,
-            unit:      track!.unit,
-            unitprice: track!.unitprice,
-            color:     track!.color,
-          },
-        }));
-      const pointGeojson = { type: 'FeatureCollection' as const, features: pointFeatures };
-      await uploadData({
-        path: 'geojson/point.geojson',
-        data: new Blob([JSON.stringify(pointGeojson, null, 2)], { type: 'application/json' }),
-        options: { contentType: 'application/json' },
-      }).result;
-      setComputeStatus(prev => [...prev, `✓ Saved ${pointFeatures.length} point(s) to Amplify Storage as geojson/point.geojson.`]);
+      const count = await exportPointGeojson();
+      setComputeStatus(prev => [...prev, `✓ Saved ${count} point(s) to Amplify Storage as geojson/point.geojson.`]);
       setTimeout(() => setComputeStatus([]), 2000);
     } catch (err) {
       console.error('handleExportPoint error:', err);
