@@ -1215,15 +1215,6 @@ function App() {
         <Button onClick={handleCompletePolygon} backgroundColor={"steelblue"} color={"white"}>
           Complete Polygon
         </Button>
-        {computeStatus.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", fontWeight: "bold" }}>
-            {computeStatus.map((msg, i) => (
-              <span key={i} style={{ color: msg.startsWith("✓") ? "darkgreen" : msg.startsWith("✗") ? "red" : "darkorange" }}>
-                {msg}
-              </span>
-            ))}
-          </div>
-        )}
         {calResult !== null && (
           <span style={{ alignSelf: "center", fontWeight: "bold" }}>
             Distance: {calResult.toFixed(1)} ft
