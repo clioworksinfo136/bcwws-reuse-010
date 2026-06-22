@@ -44,7 +44,11 @@
       "Read(//c/Users/xin_q/AppData/Local/Temp/claude/C--26-01-bcwws-reuse-009/7f777728-9297-4091-9eb7-4b72dfd9e049/tasks/**)",
       "Bash(kill %1)",
       "Bash(pkill -f \"vite\")",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -match 'vite' } | Select-Object ProcessId, CommandLine | Format-Table -AutoSize -Wrap)",
+      "PowerShell(Stop-Process -Id 12896,13520 -Force)",
+      "mcp__visualize__read_me",
+      "mcp__visualize__show_widget"
     ]
   }
 }

@@ -88,7 +88,7 @@ const dateSelectionSet = [
 type DateItem = SelectionSet<Schema['Date']['type'], typeof dateSelectionSet>;
 
 const trackInfoSelectionSet = [
-  'id', 'track', 'geometry', 'ft2', 'yd2', 'unitprice', 'totalprice',
+  'id', 'track', 'geometry', 'width', 'ft2', 'yd2', 'unitprice', 'totalprice',
   'quan', 'value', 'numpoint', 'trip', 'cost', 'unit', 'lastdate', 'color', 'type', 'typeid1', 'typeid', 'createdAt', 'updatedAt',
 ] as const;
 type TrackInfoItem = SelectionSet<Schema['Track']['type'], typeof trackInfoSelectionSet>;
@@ -198,7 +198,7 @@ function App() {
   const [basemap, setBasemap] = useState("mapbox://styles/mapbox/streets-v12");
   const [pdfMode, setPdfMode] = useState(false);
   const [calResult, setCalResult] = useState<number | null>(null);
-  const [computeStatus, setComputeStatus] = useState<string[]>([]);
+  const [, setComputeStatus] = useState<string[]>([]);
   const [showAdminTabs, setShowAdminTabs] = useState<boolean>(false);
 
   //const [clickInfo, setClickInfo] = useState<DataT>();
@@ -291,6 +291,7 @@ function App() {
   const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
   const [editTrackFields, setEditTrackFields] = useState({
     track: "" as number | "", geometry: "line",
+    width: "" as number | "",
     ft2: "" as number | "", yd2: "" as number | "",
     unitprice: "" as number | "", quan: "" as number | "",
     value: "" as number | "", numpoint: "" as number | "",
@@ -299,6 +300,7 @@ function App() {
   });
   const [newTrack, setNewTrack] = useState({
     track: "" as number | "", geometry: "line",
+    width: "" as number | "",
     ft2: "" as number | "", yd2: "" as number | "",
     unitprice: "" as number | "", quan: "" as number | "",
     value: "" as number | "", numpoint: "" as number | "",
@@ -341,7 +343,7 @@ function App() {
       const { data: matchingTracks } = await client.models.Track.list({ filter: { track: { eq: val } } });
       if (!matchingTracks || matchingTracks.length === 0) {
         await client.models.Track.create({ track: val, cost: true });
-        setNewTrack({ track: "", geometry: "line", ft2: "", yd2: "", unitprice: "", quan: "", value: "", numpoint: "", trip: false, cost: true });
+        setNewTrack({ track: "", geometry: "line", width: "", ft2: "", yd2: "", unitprice: "", quan: "", value: "", numpoint: "", trip: false, cost: true });
       }
     }
   };
@@ -742,6 +744,7 @@ function App() {
     client.models.Track.create({
       track: Number(newTrack.track),
       geometry: newTrack.geometry || "line",
+      width: newTrack.width !== "" ? Number(newTrack.width) : undefined,
       ft2: newTrack.ft2 !== "" ? Number(newTrack.ft2) : undefined,
       yd2: newTrack.yd2 !== "" ? Number(newTrack.yd2) : undefined,
       unitprice: newTrack.unitprice !== "" ? Number(newTrack.unitprice) : undefined,
@@ -751,7 +754,7 @@ function App() {
       trip: newTrack.trip,
       cost: true,
     });
-    setNewTrack({ track: "", geometry: "line", ft2: "", yd2: "", unitprice: "", quan: "", value: "", numpoint: "", trip: false, cost: true });
+    setNewTrack({ track: "", geometry: "line", width: "", ft2: "", yd2: "", unitprice: "", quan: "", value: "", numpoint: "", trip: false, cost: true });
   }
 
   function saveTrackInfo(id: string) {
@@ -759,6 +762,7 @@ function App() {
       id,
       track: editTrackFields.track !== "" ? Number(editTrackFields.track) : undefined,
       geometry: editTrackFields.geometry || undefined,
+      width: editTrackFields.width !== "" ? Number(editTrackFields.width) : null,
       ft2: editTrackFields.ft2 !== "" ? Number(editTrackFields.ft2) : undefined,
       yd2: editTrackFields.yd2 !== "" ? Number(editTrackFields.yd2) : undefined,
       unitprice: editTrackFields.unitprice !== "" ? Number(editTrackFields.unitprice) : undefined,
@@ -1229,22 +1233,6 @@ function App() {
           {showAdminTabs ? "▲ Tab" : "▼ Tab"}
         </Button>
       </Flex>
-      {computeStatus.length > 0 && (
-        <div style={{
-          margin: "8px 0",
-          padding: "10px 14px",
-          backgroundColor: "#f0fff4",
-          border: "1px solid #9ae6b4",
-          borderRadius: "6px",
-          fontFamily: "monospace",
-          fontSize: "13px",
-          color: "#22543d",
-        }}>
-          {computeStatus.map((line, i) => (
-            <div key={i}>{line}</div>
-          ))}
-        </div>
-      )}
       <br />
       <Flex direction="row">
 
@@ -2056,6 +2044,7 @@ function App() {
                         <TableCell as="th">Track</TableCell>
                         <TableCell as="th">Type</TableCell>
                         <TableCell as="th">Geometry</TableCell>
+                        <TableCell as="th">Width</TableCell>
                         <TableCell as="th">ft²</TableCell>
                         <TableCell as="th">yd²</TableCell>
                         <TableCell as="th">Unit Price ($/unit)</TableCell>
@@ -2087,6 +2076,10 @@ function App() {
                             <option value="point">point</option>
                             <option value="polygon">polygon</option>
                           </select>
+                        </TableCell>
+                        <TableCell>
+                          <Input type="number" placeholder="Width" value={newTrack.width === "" ? "" : String(newTrack.width)}
+                            onChange={e => setNewTrack(p => ({ ...p, width: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '70px' }} />
                         </TableCell>
                         <TableCell>
                           <Input type="number" placeholder="ft²" value={newTrack.ft2 === "" ? "" : String(newTrack.ft2)}
@@ -2141,6 +2134,10 @@ function App() {
                               </select>
                             </TableCell>
                             <TableCell>
+                              <Input type="number" value={editTrackFields.width === "" ? "" : String(editTrackFields.width)}
+                                onChange={e => setEditTrackFields(p => ({ ...p, width: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '70px' }} />
+                            </TableCell>
+                            <TableCell>
                               <Input type="number" value={editTrackFields.ft2 === "" ? "" : String(editTrackFields.ft2)}
                                 onChange={e => setEditTrackFields(p => ({ ...p, ft2: e.target.value === "" ? "" : Number(e.target.value) }))} style={{ width: '70px' }} />
                             </TableCell>
@@ -2183,6 +2180,7 @@ function App() {
                             <TableCell>{item.track}</TableCell>
                             <TableCell>{(item as any).type ?? ''}</TableCell>
                             <TableCell>{item.geometry}</TableCell>
+                            <TableCell>{item.width ?? ''}</TableCell>
                             <TableCell>{item.ft2 != null ? Math.round(item.ft2).toLocaleString('en-US') : ''}</TableCell>
                             <TableCell>{item.yd2 != null ? Math.round(item.yd2).toLocaleString('en-US') : ''}</TableCell>
                             <TableCell>{item.unitprice != null ? '$' + Math.round(item.unitprice).toLocaleString('en-US') : ''}</TableCell>
@@ -2197,6 +2195,7 @@ function App() {
                                 setEditTrackFields({
                                   track: item.track ?? "",
                                   geometry: item.geometry ?? "line",
+                                  width: item.width ?? "",
                                   ft2: item.ft2 ?? "",
                                   yd2: item.yd2 ?? "",
                                   unitprice: item.unitprice ?? "",
@@ -2209,6 +2208,15 @@ function App() {
                                   lastdate: item.lastdate ?? "",
                                 });
                               }} style={{ backgroundColor: '#2b6cb0', color: 'white', border: 'none', padding: '4px 8px', cursor: 'pointer', marginRight: '4px' }}>Edit</button>
+                              {item.geometry === 'line' && (
+                                <button onClick={() => {
+                                  const input = window.prompt(`Modify width for track ${item.track}:`, item.width != null ? String(item.width) : '');
+                                  if (input === null) return;
+                                  const w = Number(input);
+                                  if (input.trim() === '' || isNaN(w)) { alert('Please enter a valid number for width.'); return; }
+                                  client.models.Track.update({ id: item.id, width: w });
+                                }} style={{ backgroundColor: '#d69e2e', color: 'white', border: 'none', padding: '4px 8px', cursor: 'pointer', marginRight: '4px' }}>Modify</button>
+                              )}
                               <button onClick={() => { if (window.confirm(`Delete track ${item.track} record?`)) client.models.Track.delete({ id: item.id }); }} style={{ backgroundColor: 'red', color: 'white', border: 'none', padding: '4px 8px', cursor: 'pointer' }}>Delete</button>
                             </TableCell>
                           </TableRow>
