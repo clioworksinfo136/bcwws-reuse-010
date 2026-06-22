@@ -2208,15 +2208,6 @@ function App() {
                                   lastdate: item.lastdate ?? "",
                                 });
                               }} style={{ backgroundColor: '#2b6cb0', color: 'white', border: 'none', padding: '4px 8px', cursor: 'pointer', marginRight: '4px' }}>Edit</button>
-                              {item.geometry === 'line' && (
-                                <button onClick={() => {
-                                  const input = window.prompt(`Modify width for track ${item.track}:`, item.width != null ? String(item.width) : '');
-                                  if (input === null) return;
-                                  const w = Number(input);
-                                  if (input.trim() === '' || isNaN(w)) { alert('Please enter a valid number for width.'); return; }
-                                  client.models.Track.update({ id: item.id, width: w });
-                                }} style={{ backgroundColor: '#d69e2e', color: 'white', border: 'none', padding: '4px 8px', cursor: 'pointer', marginRight: '4px' }}>Modify</button>
-                              )}
                               <button onClick={() => { if (window.confirm(`Delete track ${item.track} record?`)) client.models.Track.delete({ id: item.id }); }} style={{ backgroundColor: 'red', color: 'white', border: 'none', padding: '4px 8px', cursor: 'pointer' }}>Delete</button>
                             </TableCell>
                           </TableRow>
