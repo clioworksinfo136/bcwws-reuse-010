@@ -1157,10 +1157,13 @@ function App() {
       if (trackRec.geometry === 'line') {
         const sumLength = pts.reduce((s, p) => s + (p.length ?? 0), 0);
         const w = trackRec.width ?? 1;
-        const total = Math.round(sumLength * w / 9 * 100) / 100;
+        const isAvgType = trackRec.type != null && AVG_WIDTH_TYPES.includes(trackRec.type);
+        const total = isAvgType
+          ? Math.round(sumLength * w / 9 * 100) / 100
+          : Math.round(sumLength * w * 100) / 100;
         await client.models.Track.update({ id: trackRec.id, quan: total });
         flushSync(() => setComputeStatus(prev => [...prev,
-          `  • Track ${trackRec.track} (line): quan = Σlength × width / 9 = ${Math.round(sumLength * 100) / 100} × ${w} / 9 = ${total}`]));
+          `  • Track ${trackRec.track} (line): quan = Σlength × width${isAvgType ? ' / 9' : ''} = ${Math.round(sumLength * 100) / 100} × ${w}${isAvgType ? ' / 9' : ''} = ${total}`]));
 
       } else if (trackRec.geometry === 'point') {
         const n = pts.length;
