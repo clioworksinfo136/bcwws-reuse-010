@@ -24,7 +24,7 @@ import {
 // deck.gl overlay for the pipeline/tick vector tilesets + station GeoJSON.
 import { GoogleMapsOverlay } from "@deck.gl/google-maps";
 import { MVTLayer } from "@deck.gl/geo-layers";
-import { TextLayer } from "@deck.gl/layers";
+import { GeoJsonLayer, TextLayer } from "@deck.gl/layers";
 
 import type { WaterFeatureProperties } from './types';
 import './MapView.css';
@@ -57,6 +57,7 @@ import {
 //import type { WaterFeatureProperties } from './types';
 import './FeaturePopup.css';
 import { TRACK_DATA } from './trackData';
+import textFeatures from './text.json';
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string;
 const GOOGLE_MAPS_MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string;
 // Still required to fetch the Mapbox-hosted pipeline/tick vector tilesets.
@@ -420,6 +421,17 @@ function MapOverlays({ show }: { show: boolean }) {
   // after setMap(null) -> setMap(map) confuses Google's overlay/Draw lifecycle
   // and layers stop re-rendering, so we create once and update via setProps.
   const overlayRef = useRef<GoogleMapsOverlay | null>(null);
+  // Track the live map zoom so station-label text size can scale with it
+  // (smaller when zoomed out so the map isn't crowded).
+  const [zoom, setZoom] = useState(16);
+
+  useEffect(() => {
+    if (!map) return;
+    const sync = () => setZoom(map.getZoom() ?? 16);
+    sync();
+    const h = map.addListener('zoom_changed', sync);
+    return () => { google.maps.event.removeListener(h); };
+  }, [map]);
 
   // Attach/detach the overlay to the map instance once.
   useEffect(() => {
@@ -442,6 +454,10 @@ function MapOverlays({ show }: { show: boolean }) {
       overlay.setProps({ layers: [] });
       return;
     }
+
+    // Station-label font size: ramps with zoom so labels are readable when
+    // zoomed in but shrink (and declutter) when zoomed out.
+    const labelSize = Math.max(7, Math.min(16, Math.round(zoom - 4)));
 
     const mvtUrl = (tileset: string) =>
       `https://api.mapbox.com/v4/${tileset}/{z}/{x}/{y}.mvt?access_token=${MAPBOX_TOKEN}`;
@@ -469,44 +485,34 @@ function MapOverlays({ show }: { show: boolean }) {
         dashJustified: true,
         stroked: false,
       }),
-      // Station labels + points from the Mapbox-hosted vector tile.
-      // NOTE: this tileset only has data up to z15, so cap requests at z15 and
-      // let deck.gl overzoom — requesting z16+ returns empty tiles (no labels).
-      new MVTLayer({
+      // Station tick labels + points from the local GeoJSON file (text.json).
+      // Points are tiny (radius 1px); labels come from the "Text" property.
+      new GeoJsonLayer({
         id: 'station-points',
-        data: mvtUrl('qiaoxin136.fa1iqa'),
-        maxZoom: 15,
+        data: textFeatures as any,
+        pointRadiusUnits: 'pixels',
+        pointRadiusScale: 1,
         pointRadiusMinPixels: 1,
         pointRadiusMaxPixels: 2,
-        // Points transparent — only the labels are kept.
-        getFillColor: [0, 0, 0, 0],
+        getFillColor: [0, 0, 0],
         stroked: false,
       }),
-      new MVTLayer({
+      new TextLayer({
         id: 'station-labels',
-        data: mvtUrl('qiaoxin136.fa1iqa'),
-        maxZoom: 15,
-        // Render the parsed tile features as text labels instead of geometry.
-        renderSubLayers: (props) => {
-          return new TextLayer({
-            ...props,
-            getPosition: (f: any) => f.geometry.coordinates,
-            getText: (f: any) => f.properties?.Text ?? '',
-            getColor: [0, 0, 0],
-            // Transparent background so labels don't carry a white box.
-            backgroundColor: [255, 255, 255, 0],
-            getSize: 11,
-            getPixelOffset: [0, 12],
-            getTextAnchor: 'middle',
-            getAlignmentBaseline: 'top',
-            characterSet: 'auto',
-          });
-        },
+        data: (textFeatures as any).features ?? [],
+        getPosition: (f: any) => f.geometry.coordinates,
+        getText: (f: any) => f.properties?.Text ?? '',
+        getColor: [0, 0, 0],
+        getSize: labelSize,
+        getPixelOffset: [0, 12],
+        getTextAnchor: 'middle',
+        getAlignmentBaseline: 'top',
+        characterSet: 'auto',
       }),
     ];
 
     overlay.setProps({ layers });
-  }, [show]);
+  }, [show, zoom]);
 
   return null;
 }
@@ -1794,9 +1800,9 @@ function App() {
             content: (<>
               <APIProvider apiKey={GOOGLE_MAPS_API_KEY} solutionChannel="GMP_visgl_rgmgm_v1">
                 <GoogleMap
-                  // Google won't change mapId/colorScheme/mapTypeId after creation, so a key forces
-                  // a clean remount when the base-map selection changes.
-                  key={basemap}
+                  // NOTE: no key={basemap} here. Remounting on basemap change would
+                  // reset the camera (center/zoom). mapTypeId changes live on the
+                  // existing map instance, so the view is preserved.
                   mapId={GOOGLE_MAPS_MAP_ID}
                   defaultCenter={{ lat: 26.260443058928075, lng: -80.13289123074017 }}
                   defaultZoom={16}
