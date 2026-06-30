@@ -556,6 +556,7 @@ function App() {
   void pdfMode; // retained for future PDF line-click handling
   const [calResult, setCalResult] = useState<number | null>(null);
   const [computeStatus, setComputeStatus] = useState<string[]>([]);
+  const [completeStatus, setCompleteStatus] = useState<string[]>([]);
   const [showAdminTabs, setShowAdminTabs] = useState<boolean>(false);
 
   //const [clickInfo, setClickInfo] = useState<DataT>();
@@ -1184,6 +1185,8 @@ function App() {
 
 
   async function handleCompletePolygon() {
+    const push = (line: string) => flushSync(() => setCompleteStatus(prev => [...prev, line]));
+    flushSync(() => setCompleteStatus([]));
     try {
       const LAT_FT = 364000;
       const features: {
@@ -1193,6 +1196,7 @@ function App() {
       }[] = [];
 
       const polygonTracks = trackInfoList.filter(t => t.geometry === 'polygon');
+      push(`Pass 1: Polygon tracks — ${polygonTracks.length} candidate(s)`);
 
       for (const trackRec of polygonTracks) {
         const pts = location
@@ -1204,7 +1208,7 @@ function App() {
           });
 
         if (pts.length < 3) {
-          console.log(`Track ${trackRec.track}: skipped (only ${pts.length} point(s))`);
+          push(`  • Track ${trackRec.track}: skipped (only ${pts.length} point(s), need ≥3)`);
           continue;
         }
 
@@ -1243,9 +1247,12 @@ function App() {
             cost:      trackRec.cost,
           },
         });
+        push(`  • Track ${trackRec.track}: polygon built — ${n} pts, ${sqFt.toLocaleString()} ft² (${sqYd.toLocaleString()} yd²)`);
       }
 
       if (features.length === 0) {
+        push(`Pass 1: no polygon tracks had ≥3 points — nothing uploaded.`);
+        push(`Done (no output).`);
         return;
       }
 
@@ -1286,15 +1293,18 @@ function App() {
         data: blob,
         options: { contentType: 'application/json' },
       }).result;
+      push(`Pass 1: uploaded polygon.geojson — ${features.length} feature(s)`);
 
       // Export locations on line-geometry tracks as line.geojson (one LineString per track)
       const lineTracks = trackInfoList.filter(t => t.geometry === 'line');
+      push(`Pass 2: Line tracks — ${lineTracks.length} candidate(s)`);
       const lineFeatures = [];
+      let lineSkipped = 0;
       for (const trackRec of lineTracks) {
         const pts = location
           .filter(l => l.track === trackRec.track && l.lat != null && l.lng != null)
           .sort((a, b) => `${a.date ?? ''}T${a.time ?? ''}`.localeCompare(`${b.date ?? ''}T${b.time ?? ''}`));
-        if (pts.length < 2) continue;
+        if (pts.length < 2) { lineSkipped++; continue; }
         lineFeatures.push({
           type: 'Feature' as const,
           geometry: {
@@ -1322,11 +1332,16 @@ function App() {
         data: new Blob([JSON.stringify(lineGeojson, null, 2)], { type: 'application/json' }),
         options: { contentType: 'application/json' },
       }).result;
+      push(`Pass 2: uploaded line.geojson — ${lineFeatures.length} feature(s), ${lineSkipped} skipped (<2 pts)`);
 
       // Last pass: export point-geometry track locations to point.geojson
-      await exportPointGeojson();
+      const pointCount = await exportPointGeojson();
+      push(`Pass 3: uploaded point.geojson — ${pointCount} feature(s)`);
+
+      push(`Done. polygon.geojson, line.geojson, point.geojson written to storage.`);
     } catch (err) {
       console.error('handleCompletePolygon error:', err);
+      push(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -1703,6 +1718,30 @@ function App() {
             </button>
           </div>
           {computeStatus.map((line, i) => (
+            <div key={i}>{line}</div>
+          ))}
+        </div>
+      )}
+      {completeStatus.length > 0 && (
+        <div style={{
+          margin: "8px 0",
+          padding: "10px 14px",
+          backgroundColor: "#eff6ff",
+          border: "1px solid #93c5fd",
+          borderRadius: "6px",
+          fontFamily: "monospace",
+          fontSize: "13px",
+          color: "#1e3a8a",
+        }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "6px" }}>
+            <button
+              onClick={() => setCompleteStatus([])}
+              style={{ backgroundColor: "#2563eb", color: "white", border: "none", borderRadius: "4px", padding: "2px 10px", cursor: "pointer", fontSize: "12px" }}
+            >
+              Clear
+            </button>
+          </div>
+          {completeStatus.map((line, i) => (
             <div key={i}>{line}</div>
           ))}
         </div>
