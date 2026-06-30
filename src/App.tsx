@@ -9,37 +9,25 @@ import type { SelectionSet } from "aws-amplify/data";
 import "@aws-amplify/ui-react/styles.css";
 import { uploadData, remove, getUrl } from "aws-amplify/storage";
 
-import type { MapMouseEvent } from "mapbox-gl";
+// Google Maps (replaces the previous Mapbox/react-map-gl implementation).
+import {
+  APIProvider,
+  Map as GoogleMap,
+  AdvancedMarker,
+  InfoWindow,
+  Circle,
+  useMap,
+  ControlPosition,
+  type MapMouseEvent,
+} from "@vis.gl/react-google-maps";
 
-
-import 'mapbox-gl/dist/mapbox-gl.css';
-//import { useGeoJSON } from './useGeoJSON';
+// deck.gl overlay for the pipeline/tick vector tilesets + station GeoJSON.
+import { GoogleMapsOverlay } from "@deck.gl/google-maps";
+import { MVTLayer } from "@deck.gl/geo-layers";
+import { TextLayer } from "@deck.gl/layers";
 
 import type { WaterFeatureProperties } from './types';
 import './MapView.css';
-
-//import { MapboxOverlay, MapboxOverlayProps } from "@deck.gl/mapbox/typed";
-//import { PickingInfo } from "@deck.gl/core/typed";
-
-import "maplibre-gl/dist/maplibre-gl.css";
-
-import {
-  Map,
-  Source,
-  Layer,
-  //useControl,
-  //Popup,
-  Marker,
-  NavigationControl,
-  GeolocateControl,
-  ScaleControl,
-  Popup
-} from "react-map-gl";
-
-
-
-import "mapbox-gl/dist/mapbox-gl.css";
-
 
 import {
   Input,
@@ -69,6 +57,9 @@ import {
 //import type { WaterFeatureProperties } from './types';
 import './FeaturePopup.css';
 import { TRACK_DATA } from './trackData';
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string;
+const GOOGLE_MAPS_MAP_ID = import.meta.env.VITE_GOOGLE_MAPS_MAP_ID as string;
+// Still required to fetch the Mapbox-hosted pipeline/tick vector tilesets.
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string;
 
 const client = generateClient<Schema>();
@@ -93,8 +84,24 @@ const trackInfoSelectionSet = [
 ] as const;
 type TrackInfoItem = SelectionSet<Schema['Track']['type'], typeof trackInfoSelectionSet>;
 
+// Some TRACK_DATA color values use non-standard names ("light green", "grey")
+// that aren't valid CSS colors → would render transparent. Map them to hex.
+const COLOR_OVERRIDES: Record<string, string> = {
+  'light green': '#90ee90',
+  'lightgreen': '#90ee90',
+  'grey': '#a0a0a0',
+  'gray': '#a0a0a0',
+};
+
+const resolveColor = (c: string | null | undefined): string => {
+  if (!c) return '#2b6cb0';
+  const lower = c.trim().toLowerCase();
+  if (COLOR_OVERRIDES[lower]) return COLOR_OVERRIDES[lower];
+  return c;
+};
+
 const TYPE_COLOR_MAP: Record<string, string> = Object.fromEntries(
-  TRACK_DATA.filter(r => r.type && r.color).map(r => [r.type, r.color] as [string, string])
+  TRACK_DATA.filter(r => r.type && r.color).map(r => [r.type, resolveColor(r.color)] as [string, string])
 );
 
 
@@ -138,10 +145,8 @@ export type CustomEvent = {
 }
 // Hong's addition end
 
-//const MAP_STYLE = "mapbox://styles/mapbox/streets-v12";
-// "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
-
-
+// Available base-map kinds for the Google Maps Progress Map tab.
+type BasemapKind = 'light' | 'street' | 'satellite';
 
 interface PopupInfo {
   longitude: number;
@@ -149,36 +154,368 @@ interface PopupInfo {
   properties: WaterFeatureProperties;
 }
 
+// Custom "geolocate" control: react-google-maps has no built-in equivalent,
+// so we use the useMap() hook to access the google.maps.Map instance and the
+// browser Geolocation API to pan to the user's current position.
+// On a successful fix it draws a blue "my location" dot with an accuracy circle,
+// and exposes a ✕ control to clear it.
+function GeolocateButton() {
+  const map = useMap();
+  const [geo, setGeo] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
+
+  const onClick = () => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setGeo({ lat, lng, accuracy: pos.coords.accuracy });
+        map?.panTo({ lat, lng });
+        map?.setZoom(18);
+      },
+      (err) => console.error('Geolocation error:', err),
+      { enableHighAccuracy: true }
+    );
+  };
+
+  const clear = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setGeo(null);
+  };
+
+  return (
+    <>
+      {/* Blue dot + accuracy circle at the searched location. */}
+      {geo && (
+        <>
+          <Circle
+            center={{ lat: geo.lat, lng: geo.lng }}
+            radius={geo.accuracy}
+            strokeColor="#1a73e8"
+            strokeOpacity={0.5}
+            strokeWeight={1}
+            fillColor="#1a73e8"
+            fillOpacity={0.12}
+          />
+          <AdvancedMarker position={{ lat: geo.lat, lng: geo.lng }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" style={{ pointerEvents: 'none' }}>
+              <circle cx="12" cy="12" r="7" fill="#1a73e8" stroke="#fff" strokeWidth="2.5" />
+            </svg>
+          </AdvancedMarker>
+        </>
+      )}
+
+      <button
+        onClick={onClick}
+        title="Locate me"
+        style={{
+          // Sit above the native bottom-right control cluster
+          // (fullscreen / pegman / zoom +/-).
+          position: 'absolute',
+          right: '15px',
+          bottom: '65px',
+          width: '26px',
+          height: '26px',
+          background: '#fff',
+          border: 'none',
+          borderRadius: '2px',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+          cursor: 'pointer',
+          padding: 0,
+          margin: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 5,
+        }}
+      >
+        {/* The standard Google Maps "my location" dot icon (matching the native geolocator). */}
+        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="6" fill="#1a73e8" />
+          <circle cx="12" cy="12" r="11" fill="none" stroke="#1a73e8" strokeWidth="1.4" opacity="0.45" />
+        </svg>
+      </button>
+
+      {/* ✕ control to clear the location marker/circle — directly above the locate button. */}
+      {geo && (
+        <button
+          onClick={clear}
+          title="Clear location"
+          style={{
+            position: 'absolute',
+            right: '20px',
+            bottom: '89px',
+            width: '18px',
+            height: '18px',
+            background: '#fff',
+            border: 'none',
+            borderRadius: '50%',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+            cursor: 'pointer',
+            padding: 0,
+            margin: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 5,
+            fontSize: '10px',
+            lineHeight: 1,
+            color: '#5f6368',
+          }}
+        >
+          ✕
+        </button>
+      )}
+    </>
+  );
+}
+
+// Watches the map's Street View panomatcher / panorama and reports:
+//  - when the user drops the pegman (panorama becomes visible) → onOpenChange(true)
+//  - the panorama's position + heading as the user moves/looks around
+//  - when the user closes Street View → onOpenChange(false)
+function StreetViewWatcher({
+  onOpenChange,
+  onPosChange,
+  onHeadingChange,
+  onPanoChange,
+}: {
+  onOpenChange: (open: boolean) => void;
+  onPosChange: (lat: number, lng: number) => void;
+  onHeadingChange: (heading: number) => void;
+  onPanoChange: (panoId: string | null) => void;
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!map) return;
+    const sv = map.getStreetView();
+
+    const sync = () => {
+      const visible = sv.getVisible();
+      onOpenChange(!!visible);
+      if (!visible) {
+        onPanoChange(null);
+        return;
+      }
+      const pano = sv.getPano();
+      onPanoChange(pano ?? null);
+      const pos = sv.getPosition();
+      if (pos) {
+        onPosChange(pos.lat(), pos.lng());
+      }
+      const pov = sv.getPov();
+      if (pov && typeof pov.heading === 'number') {
+        onHeadingChange(pov.heading);
+      }
+    };
+
+    const handlers: google.maps.MapsEventListener[] = [
+      sv.addListener('visible_changed', sync),
+      sv.addListener('position_changed', sync),
+      sv.addListener('pano_changed', sync),
+      sv.addListener('pov_changed', sync),
+    ];
+
+    return () => { handlers.forEach(h => h.remove()); };
+  }, [map, onOpenChange, onPosChange, onHeadingChange, onPanoChange]);
+
+  return null;
+}
+
+// Renders the map's Street View panorama into a custom DOM container (the
+// right-side panel) and reassigns it to the map via setStreetView(). This makes
+// pegman drops populate our panel instead of the default inline panorama, while
+// keeping Google's built-in drag/drop Street View wiring fully functional.
+function StreetViewPanel({
+  open,
+  panoId,
+  onClose,
+}: {
+  open: boolean;
+  panoId: string | null;
+  onClose: () => void;
+}) {
+  const map = useMap();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const panoRef = useRef<google.maps.StreetViewPanorama | null>(null);
+
+  useEffect(() => {
+    if (!map || !containerRef.current) return;
+    // Create the panorama once and hand it to the map so pegman targets it.
+    const pano = new google.maps.StreetViewPanorama(containerRef.current, {
+      visible: false,
+      addressControl: true,
+      addressControlOptions: { position: google.maps.ControlPosition.BOTTOM_LEFT },
+      showRoadLabels: true,
+      enableCloseButton: false,
+    });
+    panoRef.current = pano;
+    map.setStreetView(pano);
+    return () => {
+      panoRef.current = null;
+    };
+  }, [map]);
+
+  // Always mount the container so it is wired into the map (via setStreetView)
+  // BEFORE any pegman drop occurs. We only toggle visibility with CSS — if we
+  // unmount when closed, the first drop hits Google's default inline panorama
+  // on the left instead of our right-side panel.
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        width: '50%',
+        height: '100%',
+        background: '#000',
+        zIndex: 10,
+        boxShadow: '-4px 0 12px rgba(0,0,0,0.3)',
+        display: open ? 'block' : 'none',
+      }}
+    >
+      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+      <div style={{ position: 'absolute', top: '12px', left: '12px', color: '#fff', fontSize: '12px', textShadow: '0 1px 2px rgba(0,0,0,0.8)', zIndex: 1, pointerEvents: 'none' }}>
+        Street View{panoId ? ` · ${panoId.slice(0, 12)}` : ''}
+      </div>
+      <button
+        onClick={() => {
+          // Hide the panorama; the watcher will report open=false.
+          panoRef.current?.setVisible(false);
+          onClose();
+        }}
+        title="Close Street View"
+        style={{
+          position: 'absolute',
+          top: '10px',
+          right: '10px',
+          width: '32px',
+          height: '32px',
+          background: '#fff',
+          border: 'none',
+          borderRadius: '4px',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+          cursor: 'pointer',
+          fontSize: '18px',
+          lineHeight: 1,
+          color: '#5f6368',
+          zIndex: 1,
+        }}
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+// deck.gl overlay rendered on top of the Google base map:
+//   - pipeline `lines` and `tick` strokes from the Mapbox-hosted vector tilesets
+//   - station points + station labels from the local /station.geojson
+// The overlay attaches to the google.maps.Map instance via useMap() and
+// rebuilds its layer set whenever the underlying data changes.
+function MapOverlays({ show }: { show: boolean }) {
+  const map = useMap();
+  // Keep a single overlay instance for the component's lifetime. Recreating it
+  // after setMap(null) -> setMap(map) confuses Google's overlay/Draw lifecycle
+  // and layers stop re-rendering, so we create once and update via setProps.
+  const overlayRef = useRef<GoogleMapsOverlay | null>(null);
+
+  // Attach/detach the overlay to the map instance once.
+  useEffect(() => {
+    if (!map) return;
+    const overlay = new GoogleMapsOverlay({ layers: [] });
+    overlay.setMap(map);
+    overlayRef.current = overlay;
+    return () => {
+      overlay.setMap(null);
+      overlayRef.current = null;
+    };
+  }, [map]);
+
+  // Push the current layer set (or empty when hidden) whenever inputs change.
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+
+    if (!show) {
+      overlay.setProps({ layers: [] });
+      return;
+    }
+
+    const mvtUrl = (tileset: string) =>
+      `https://api.mapbox.com/v4/${tileset}/{z}/{x}/{y}.mvt?access_token=${MAPBOX_TOKEN}`;
+
+    const layers: any[] = [
+      new MVTLayer({
+        id: 'lines',
+        data: mvtUrl('qiaoxin136.6712mnvq'),
+        // Each tileset contains a single source-layer, so render all features
+        // (filtering by source-layer name was dropping everything).
+        getLineColor: [199, 160, 202],
+        getLineWidth: 2,
+        lineWidthUnits: 'pixels',
+        getDashArray: [4, 2],
+        dashJustified: true,
+        stroked: false,
+      }),
+      new MVTLayer({
+        id: 'tick',
+        data: mvtUrl('qiaoxin136.3axmzn09'),
+        getLineColor: [149, 151, 150],
+        getLineWidth: 2,
+        lineWidthUnits: 'pixels',
+        getDashArray: [4, 2],
+        dashJustified: true,
+        stroked: false,
+      }),
+      // Station labels + points from the Mapbox-hosted vector tile.
+      // NOTE: this tileset only has data up to z15, so cap requests at z15 and
+      // let deck.gl overzoom — requesting z16+ returns empty tiles (no labels).
+      new MVTLayer({
+        id: 'station-points',
+        data: mvtUrl('qiaoxin136.fa1iqa'),
+        maxZoom: 15,
+        pointRadiusMinPixels: 1,
+        pointRadiusMaxPixels: 2,
+        // Points transparent — only the labels are kept.
+        getFillColor: [0, 0, 0, 0],
+        stroked: false,
+      }),
+      new MVTLayer({
+        id: 'station-labels',
+        data: mvtUrl('qiaoxin136.fa1iqa'),
+        maxZoom: 15,
+        // Render the parsed tile features as text labels instead of geometry.
+        renderSubLayers: (props) => {
+          return new TextLayer({
+            ...props,
+            getPosition: (f: any) => f.geometry.coordinates,
+            getText: (f: any) => f.properties?.Text ?? '',
+            getColor: [0, 0, 0],
+            // Transparent background so labels don't carry a white box.
+            backgroundColor: [255, 255, 255, 0],
+            getSize: 11,
+            getPixelOffset: [0, 12],
+            getTextAnchor: 'middle',
+            getAlignmentBaseline: 'top',
+            characterSet: 'auto',
+          });
+        },
+      }),
+    ];
+
+    overlay.setProps({ layers });
+  }, [show]);
+
+  return null;
+}
 
 function App() {
 
   const { signOut } = useAuthenticator();
   //const client = generateClient<Schema>();
   const [location, setLocation] = useState<LocationItem[]>([]);
-
-  // Build a GeoJSON FeatureCollection directly from Amplify location state.
-  // This replaces the external API URL (AIR_PORTS) which was returning
-  // malformed JSON with invalid control characters, causing no points to render.
-  const locationGeoJSON = useMemo(() => ({
-    type: 'FeatureCollection' as const,
-    features: location
-      .filter(loc => loc.lat != null && loc.lng != null)
-      .map(loc => ({
-        type: 'Feature' as const,
-        geometry: { type: 'Point' as const, coordinates: [loc.lng!, loc.lat!] },
-        properties: {
-          id:          loc.id,
-          date:        loc.date ?? '',
-          time:        loc.time ?? '',
-          track:       loc.track ?? null,
-          type:        loc.type ?? '',
-          diameter:    loc.diameter ?? null,
-          length:      loc.length ?? null,
-          description: loc.description ?? '',
-          joint:       loc.joint ?? null,
-        },
-      })),
-  }), [location]);
 
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
@@ -196,8 +533,21 @@ function App() {
   const [placePhotos, setPlacePhotos] = useState<File[]>([]);
 
   const [tab, setTab] = useState("1");
-  const [basemap, setBasemap] = useState("mapbox://styles/mapbox/streets-v12");
+  const [basemap, setBasemap] = useState<BasemapKind>("street");
+  // Toggle the deck.gl overlays (pipeline lines, tick/axis, station labels).
+  const [showOverlays, setShowOverlays] = useState(true);
+  const [showLegend, setShowLegend] = useState(false);
+  // Street View window state. When svOpen is true, a half-screen panel opens on
+  // the right showing the panorama, and a blue dot + heading cone tracks the
+  // pano's position/heading on the main map.
+  const [svOpen, setSvOpen] = useState(false);
+  const [svPos, setSvPos] = useState<{ lat: number; lng: number } | null>(null);
+  const [svHeading, setSvHeading] = useState<number>(0);
+  const [svPanoId, setSvPanoId] = useState<string | null>(null);
+  // Live map zoom level (for the zoom readout overlay).
+  const [zoomLevel, setZoomLevel] = useState<number>(16);
   const [pdfMode] = useState(false);
+  void pdfMode; // retained for future PDF line-click handling
   const [calResult, setCalResult] = useState<number | null>(null);
   const [computeStatus, setComputeStatus] = useState<string[]>([]);
   const [showAdminTabs, setShowAdminTabs] = useState<boolean>(false);
@@ -209,7 +559,10 @@ function App() {
   //const { data } = useGeoJSON();
   const [popupInfo, setPopupInfo] = useState<PopupInfo | null>(null);
   const [hoverInfo, setHoverInfo] = useState<{ longitude: number; latitude: number; track: string; date: string; type: string } | null>(null);
-  const [cursor, setCursor] = useState<string>('grab');
+  // Debounced hover-clear ref: when the mouse briefly leaves the marker for the
+  // InfoWindow (or vice versa), we don't want to flicker the tooltip. The
+  // pending-leave timeout is cancelled whenever the marker/window is re-entered.
+  const hoverLeaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [editTrack, setEditTrack] = useState<string>('');
   const [editDescription, setEditDescription] = useState<string>('');
   const [editDiameter, setEditDiameter] = useState<string>('');
@@ -250,17 +603,6 @@ function App() {
     return map;
   }, [trackInfoList]);
 
-  const coloredLocationGeoJSON = useMemo(() => ({
-    ...locationGeoJSON,
-    features: locationGeoJSON.features.map(f => ({
-      ...f,
-      properties: {
-        ...f.properties,
-        color: TYPE_COLOR_MAP[f.properties.type] ?? '#2b6cb0',
-        trackGeometry: f.properties.track != null ? (trackGeometryMap[f.properties.track] ?? '') : '',
-      },
-    })),
-  }), [locationGeoJSON, trackGeometryMap]);
   const [historySort, setHistorySort] = useState<{ key: 'date' | 'track' | 'type' | 'images'; dir: 1 | -1 } | null>(null);
 
   // Highest track number across all Location records — recomputes whenever location changes.
@@ -1228,79 +1570,81 @@ function App() {
     setTab("1");
   }
 
-  const onClick = useCallback((e: MapMouseEvent) => {
-    const feature = e.features?.[0];
+  // Clicking empty map surface: capture the point for a new record, close any popup.
+  const onMapClick = useCallback((e: MapMouseEvent) => {
+    const latLng = e.detail.latLng;
+    if (!latLng) return;
+    setLat(latLng.lat);
+    setLng(latLng.lng);
+    setPopupInfo(null);
+  }, []);
 
-    //console.log("clicked feature =", feature);
-    if (feature?.layer?.id === 'lines' && pdfMode) {
-      const dn = feature.properties?.DN;
-      if (dn != null) {
-        window.open(`https://bcwws-reuse.s3.us-east-1.amazonaws.com/FM${dn}.pdf`, '_blank');
-      }
-      return;
-    }
-
-    if (!feature || feature.geometry.type !== 'Point') {
-      //console.log(e);
-      setLat(e.lngLat.lat);
-      setLng(e.lngLat.lng);
-      setPopupInfo(null);
-    }
-    else {
-
-      const [lng, lat] = feature.geometry.coordinates;
-      const props = feature.properties as WaterFeatureProperties;
-      const match = location.find(loc => loc.id === props.id);
-      setPopupInfo({
-        longitude: lng,
-        latitude: lat,
-        properties: { ...props, joint: match?.joint ?? null },
-      });
-      setEditTrack(props.track != null ? String(props.track) : '');
-      setEditDescription(props.description ?? '');
-      setEditDiameter(props.diameter != null ? String(props.diameter) : '');
-      setEditWidth(match?.width != null ? String(match.width) : '');
-      setEditType(props.type ?? 'reuse');
-      setEditJoint(typeof match?.joint === 'string' ? match.joint : 'joint');
-      setEditDate(match?.date ?? props.date ?? '');
-      setEditTime((match?.time ?? props.time ?? '').slice(0, 5));
-      setFullPhotoIndex(null);
-      setPopupPhotos([]);
-      const photoPaths = (match?.photos ?? []).filter((p): p is string => !!p);
-      if (photoPaths.length > 0) {
-        Promise.all(photoPaths.map(p => getUrl({ path: p }).then(r => ({ path: p, url: r.url.toString() }))))
-          .then(photos => setPopupPhotos(photos))
-          .catch(err => console.error('Failed to resolve photo URLs:', err));
-      }
-    };
-  }, [location, pdfMode]);
-
-  const onMouseEnter = useCallback(() => setCursor('pointer'), []);
-  const onMouseLeave = useCallback(() => { setCursor('grab'); setHoverInfo(null); }, []);
-
-  const onMouseMove = useCallback((event: MapMouseEvent) => {
-    const feature = event.features && event.features[0];
-    if (feature && (feature.layer?.id === 'water-points' || feature.layer?.id === 'water-points-square')) {
-      const props = feature.properties as WaterFeatureProperties;
-      setHoverInfo({
-        longitude: event.lngLat.lng,
-        latitude: event.lngLat.lat,
-        track: props.track != null ? String(props.track) : '',
-        date: props.date ?? '',
-        type: props.type ?? '',
-      });
-    } else {
-      setHoverInfo(null);
+  // Clicking a location marker: open the editable info popup for that point.
+  const openPopupForLocation = useCallback((loc: LocationItem) => {
+    if (loc.lat == null || loc.lng == null) return;
+    const props = {
+      id:          loc.id,
+      date:        loc.date ?? '',
+      time:        loc.time ?? '',
+      track:       loc.track,
+      type:        loc.type ?? '',
+      diameter:    loc.diameter ?? null,
+      length:      loc.length ?? null,
+      description: loc.description ?? '',
+      joint:       loc.joint ?? null,
+    } as unknown as WaterFeatureProperties;
+    setPopupInfo({
+      longitude: loc.lng,
+      latitude: loc.lat,
+      properties: props,
+    });
+    setEditTrack(loc.track != null ? String(loc.track) : '');
+    setEditDescription(loc.description ?? '');
+    setEditDiameter(loc.diameter != null ? String(loc.diameter) : '');
+    setEditWidth(loc.width != null ? String(loc.width) : '');
+    setEditType(loc.type ?? 'reuse');
+    setEditJoint(typeof loc.joint === 'string' ? loc.joint : 'joint');
+    setEditDate(loc.date ?? '');
+    setEditTime((loc.time ?? '').slice(0, 5));
+    setFullPhotoIndex(null);
+    setPopupPhotos([]);
+    const photoPaths = (loc.photos ?? []).filter((p): p is string => !!p);
+    if (photoPaths.length > 0) {
+      Promise.all(photoPaths.map(p => getUrl({ path: p }).then(r => ({ path: p, url: r.url.toString() }))))
+        .then(photos => setPopupPhotos(photos))
+        .catch(err => console.error('Failed to resolve photo URLs:', err));
     }
   }, []);
 
+  const onMarkerMouseEnter = useCallback((loc: LocationItem) => {
+    if (loc.lat == null || loc.lng == null) return;
+    // Cancel any pending hide so re-entering the marker keeps the tooltip open.
+    if (hoverLeaveTimer.current) {
+      clearTimeout(hoverLeaveTimer.current);
+      hoverLeaveTimer.current = null;
+    }
+    setHoverInfo({
+      longitude: loc.lng,
+      latitude: loc.lat,
+      track: loc.track != null ? String(loc.track) : '',
+      date: loc.date ?? '',
+      type: loc.type ?? '',
+    });
+  }, []);
+
+  const onMarkerMouseLeave = useCallback(() => {
+    // Defer the hide: the mouse may be transitioning into the InfoWindow, which
+    // would otherwise trigger a flicker loop (leave → hide → enter → show …).
+    if (hoverLeaveTimer.current) clearTimeout(hoverLeaveTimer.current);
+    hoverLeaveTimer.current = setTimeout(() => {
+      setHoverInfo(null);
+      hoverLeaveTimer.current = null;
+    }, 120);
+  }, []);
+
   const change_basemap = (value: string) => {
-    if (value === "light") {
-      setBasemap("mapbox://styles/mapbox/light-v11")
-    } else if (value === "street") {
-      setBasemap("mapbox://styles/mapbox/streets-v12")
-    } else if (value === "satellite") {
-      setBasemap("mapbox://styles/mapbox/satellite-streets-v12")
+    if (value === "light" || value === "street" || value === "satellite") {
+      setBasemap(value);
     }
   };
 
@@ -1308,7 +1652,6 @@ function App() {
     <main>
       <h1>BCWWS REGIONAL EFFLUENT AND REUSE SOLUTIONS - EFFLUENT WATER TRANSMISSION MAIN</h1>
       <Divider orientation="horizontal" />
-      <br />
       <Flex alignItems="flex-start">
         <Button onClick={handleCal} backgroundColor={"lightyellow"} color={"darkblue"}>
           QC
@@ -1358,9 +1701,7 @@ function App() {
           ))}
         </div>
       )}
-      <br />
       <Flex direction="row" alignItems="flex-end" className="toolbar-inputs">
-
         <label style={{ display: 'flex', flexDirection: 'column' }}>
           <span style={{ fontSize: '10px', color: '#666' }}>Date</span>
           <input
@@ -1368,7 +1709,7 @@ function App() {
             value={date}
             placeholder="date"
             onChange={handleDate}
-            style={{ width: '80px', height: '42px', boxSizing: 'border-box' }}
+            style={{ width: '80px', height: '30px', boxSizing: 'border-box' }}
           />
         </label>
         <label style={{ display: 'flex', flexDirection: 'column' }}>
@@ -1378,7 +1719,7 @@ function App() {
             value={time}
             placeholder="time"
             onChange={handleTime}
-            style={{ width: '80px', height: '42px', boxSizing: 'border-box' }}
+            style={{ width: '80px', height: '30px', boxSizing: 'border-box' }}
           />
         </label>
         <label style={{ display: 'flex', flexDirection: 'column' }}>
@@ -1388,7 +1729,7 @@ function App() {
             value={track}
             placeholder="track"
             onChange={handleTrack}
-            style={{ width: '50px', height: '42px', boxSizing: 'border-box' }}
+            style={{ width: '50px', height: '30px', boxSizing: 'border-box' }}
           />
         </label>
         <label style={{ display: 'flex', flexDirection: 'column' }}>
@@ -1398,7 +1739,7 @@ function App() {
             value={width}
             placeholder="width"
             onChange={e => setWidth(e.target.value === "" ? 0 : Number(e.target.value))}
-            style={{ width: '50px', height: '42px', boxSizing: 'border-box' }}
+            style={{ width: '50px', height: '30px', boxSizing: 'border-box' }}
           />
         </label>
         <label style={{ display: 'flex', flexDirection: 'column' }}>
@@ -1435,7 +1776,7 @@ function App() {
         <button
           onClick={() => setShowTrackTypes(true)}
           title="Show all track / type values"
-          style={{ alignSelf: 'center', marginLeft: 'auto', fontSize: '18px', fontWeight: 'bold', color: '#1a365d', whiteSpace: 'nowrap', background: '#ebf4ff', border: '1px solid #1a365d', borderRadius: '6px', padding: '4px 12px', cursor: 'pointer' }}
+          style={{ alignSelf: 'center', marginLeft: 'auto', fontSize: '12px', fontWeight: 'bold', color: '#1a365d', whiteSpace: 'nowrap', background: '#ebf4ff', border: '1px solid #1a365d', borderRadius: '6px', padding: '2px 8px', height: '30px', lineHeight: 1, cursor: 'pointer' }}
         >
           Max Track: {maxTrack ?? '—'}
         </button>
@@ -1451,452 +1792,515 @@ function App() {
             label: "Progress Map",
             value: "1",
             content: (<>
-              <Map
-                initialViewState={{
-                  longitude: -80.13289123074017,
-                  latitude: 26.260443058928075,
-                  zoom: 16,
-                }}
-                mapboxAccessToken={MAPBOX_TOKEN}
-                maxZoom={23}
-                //mapLib={maplibregl}
-                mapStyle={basemap} // Use any MapLibre-compatible style
+              <APIProvider apiKey={GOOGLE_MAPS_API_KEY} solutionChannel="GMP_visgl_rgmgm_v1">
+                <GoogleMap
+                  // Google won't change mapId/colorScheme/mapTypeId after creation, so a key forces
+                  // a clean remount when the base-map selection changes.
+                  key={basemap}
+                  mapId={GOOGLE_MAPS_MAP_ID}
+                  defaultCenter={{ lat: 26.260443058928075, lng: -80.13289123074017 }}
+                  defaultZoom={16}
+                  maxZoom={23}
+                  isFractionalZoomEnabled
+                  mapTypeId={basemap === 'satellite' ? 'hybrid' : 'roadmap'}
+                  {...(basemap === 'light' ? { colorScheme: 'LIGHT' as const } : {})}
+                  gestureHandling="greedy"
+                  clickableIcons={false}
+                  disableDefaultUI={false}
+                  mapTypeControl={false}
+                  zoomControl={false}
+                  scaleControl
+                  fullscreenControl
+                  streetViewControl
+                  streetViewControlOptions={{ position: ControlPosition.RIGHT_BOTTOM }}
+                  style={{ width: '100%', height: 'calc(100vh - 160px)', minHeight: '500px', border: '1px solid #000000' }}
+                  onClick={onMapClick}
+                  onZoomChanged={(e) => setZoomLevel(e.detail.zoom)}
+                >
+                  {/* deck.gl overlays: pipeline lines, ticks, station points + labels. */}
+                  <MapOverlays show={showOverlays} />
 
-                style={{
-                  width: "100%",
-                  height: "1000px",
-                  borderColor: "#000000",
-                }}
-                interactiveLayerIds={['water-points', 'water-points-square', 'lines']}
-                onClick={onClick}
-                onMouseEnter={onMouseEnter}
-                onMouseLeave={onMouseLeave}
-                onMouseMove={onMouseMove}
-                cursor={cursor}
-              >
-                <Source id="water-data" type="geojson" data={coloredLocationGeoJSON}>
+                  {/* Street View pegman tracking → drives the right-side panel + map dot/cone. */}
+                  <StreetViewWatcher
+                    onOpenChange={setSvOpen}
+                    onPosChange={(lat, lng) => setSvPos({ lat, lng })}
+                    onHeadingChange={setSvHeading}
+                    onPanoChange={setSvPanoId}
+                  />
+                  {/* Right-side half-screen Street View panel. */}
+                  <StreetViewPanel open={svOpen} panoId={svPanoId} onClose={() => setSvOpen(false)} />
 
-                  <Layer
-                    id='water-points'
-                    type='circle'
-                    source='water-data'
-                    paint={{
-                      'circle-radius': [
-                        'case',
-                        ['all', ['any', ['==', ['get', 'type'], 'wastewater'], ['==', ['get', 'type'], 'stormwater']], ['==', ['get', 'joint'], false]],
-                        5,
-                        ['all', ['any', ['==', ['get', 'type'], 'wastewater'], ['==', ['get', 'type'], 'stormwater']], ['==', ['get', 'joint'], true]],
-                        3.5,
-                        3.5
-                      ],
-                      'circle-color': [
-                        'case',
-                        ['==', ['get', 'trackGeometry'], 'point'],
-                        'rgba(0,0,0,0)',
-                        ['coalesce', ['get', 'color'], '#2b6cb0'],
-                      ],
-                      'circle-stroke-color': [
-                        'case',
-                        ['==', ['get', 'trackGeometry'], 'point'],
-                        ['coalesce', ['get', 'color'], '#2b6cb0'],
-                        '#ffffff',
-                      ],
-                      'circle-stroke-width': 2,
-                      'circle-opacity': 0.9,
-                    }}
-                    filter={['!=', ['get', 'trackGeometry'], 'polygon']}
-                  />
-                  {/* Points on polygon tracks render as squares (text glyph — circle layers can't draw squares) */}
-                  <Layer
-                    id='water-points-square'
-                    type='symbol'
-                    source='water-data'
-                    filter={['==', ['get', 'trackGeometry'], 'polygon']}
-                    layout={{
-                      'text-field': '■',
-                      'text-size': 14,
-                      'text-allow-overlap': true,
-                      'text-ignore-placement': true,
-                    }}
-                    paint={{
-                      'text-color': ['coalesce', ['get', 'color'], '#2b6cb0'],
-                      'text-halo-color': '#ffffff',
-                      'text-halo-width': 1,
-                    }}
-                  />
-                </Source>
-
-                <Source id="lines" type="vector" url="mapbox://qiaoxin136.6712mnvq">
-                  <Layer
-                    id='lines'
-                    type='line'
-                    source='lines'
-                    source-layer="line-34gbbu"
-                    paint={{
-                      'line-width': 1,
-                      // Use a get expression (https://docs.mapbox.comhttps://docs.mapbox.com/style-spec/reference/expressions/#get)
-                      // to set the line-color to a feature property value.
-                      'line-color': "#c7a0ca",
-                      'line-dasharray': [4, 2]
-                    }}
-                  />
-                </Source>
-                <Source id="tick" type="vector" url="mapbox://qiaoxin136.3axmzn09">
-                  <Layer
-                    id='tick'
-                    type='line'
-                    source='tick'
-                    source-layer="tick-d0etve"
-                    paint={{
-                      'line-width': 1,
-                      // Use a get expression (https://docs.mapbox.comhttps://docs.mapbox.com/style-spec/reference/expressions/#get)
-                      // to set the line-color to a feature property value.
-                      'line-color': "#959796",
-                      'line-dasharray': [4, 2]
-                    }}
-                  />
-                </Source>
-
-                <Source id="station" type="geojson" data="/station.geojson">
-                  <Layer
-                    id="station-points"
-                    type="circle"
-                    source="station"
-                    paint={{
-                      'circle-radius': 1,
-                      'circle-color': '#e85d04',
-                    }}
-                  />
-                </Source>
-
-                <Source id="station-labels" type="vector" url="mapbox://qiaoxin136.fa1iqa">
-                  <Layer
-                    id="station-labels"
-                    type="symbol"
-                    source="station-labels"
-                    source-layer="text.zip-kwe786"
-                    layout={{
-                      'text-field': ['get', 'Text'],
-                      'text-size': 10,
-                      'text-offset': [0, 1],
-                      'text-anchor': 'top',
-                    }}
-                    paint={{
-                      'text-color': '#000000',
-                      'text-halo-color': '#ffffff',
-                      'text-halo-width': 1,
-                    }}
-                  />
-                </Source>
-
-                <Marker latitude={Number(lat)} longitude={Number(lng)} />
-                {hoverInfo && !popupInfo && (
-                  <Popup
-                    longitude={hoverInfo.longitude}
-                    latitude={hoverInfo.latitude}
-                    anchor="bottom"
-                    offset={12}
-                    closeButton={false}
-                    closeOnClick={false}
-                  >
-                    <div style={{ fontSize: '11px', lineHeight: '1.4' }}>
-                      <div><b>Track:</b> {hoverInfo.track}</div>
-                      <div><b>Date:</b> {hoverInfo.date}</div>
-                      <div><b>Type:</b> {hoverInfo.type}</div>
-                    </div>
-                  </Popup>
-                )}
-                {popupInfo && (
-                  <>
-                    <Popup
-                      longitude={popupInfo.longitude}
-                      latitude={popupInfo.latitude}
-                      anchor="bottom"
-                      offset={12}
-                      onClose={() => setPopupInfo(null)}
-                      closeOnClick={false}
-                    >
-                      <div className="popup">
-                        <table className="popup-table">
-                          <tbody>
-                            <tr>
-                              <td>Date</td>
-                              <td>
-                                <input
-                                  aria-label="Date"
-                                  type="date"
-                                  value={editDate}
-                                  onChange={e => setEditDate(e.target.value)}
-                                  style={{ fontSize: '11px', padding: '2px 4px', width: '100%' }}
-                                />
-                              </td>
-                            </tr>
-                            <tr>
-                              <td>Time</td>
-                              <td>
-                                <input
-                                  aria-label="Time"
-                                  type="time"
-                                  value={editTime}
-                                  onChange={e => setEditTime(e.target.value)}
-                                  style={{ fontSize: '11px', padding: '2px 4px', width: '100%' }}
-                                />
-                              </td>
-                            </tr>
-                            <tr>
-                              <td>Type</td>
-                              <td>
-                                {/* Native selects can't wrap their selected value, so show it in a
-                                    wrapped 3-line box with a transparent select overlaid on top. */}
-                                <div style={{ position: 'relative' }}>
-                                  <div style={{
-                                    fontSize: '11px', padding: '2px 18px 2px 4px', width: '100%',
-                                    minHeight: '3.6em', lineHeight: '1.2em',
-                                    border: '1px solid #ccc', borderRadius: '3px',
-                                    background: '#fff', whiteSpace: 'normal', wordBreak: 'break-word',
-                                    boxSizing: 'border-box',
-                                  }}>
-                                    {editType}
-                                    <span style={{ position: 'absolute', right: '4px', top: '2px', color: '#666' }}>▾</span>
-                                  </div>
-                                  <select
-                                    aria-label="Type"
-                                    value={editType}
-                                    onChange={e => setEditType(e.target.value)}
-                                    style={{
-                                      position: 'absolute', inset: 0, width: '100%', height: '100%',
-                                      opacity: 0, cursor: 'pointer',
-                                    }}
-                                  >
-                                    {options.map((option) => {
-                                      const color = option.geometry === 'line' ? 'darkgreen'
-                                        : option.geometry === 'polygon' ? 'darkblue' : 'dimgrey';
-                                      return (
-                                        <option key={option.value} value={option.value}
-                                          style={{ color, whiteSpace: 'normal' }}>
-                                          {option.label}
-                                        </option>
-                                      );
-                                    })}
-                                  </select>
-                                </div>
-                              </td>
-                            </tr>
-                            <tr>
-                              <td>Track</td>
-                              <td>
-                                <input
-                                  aria-label="Track"
-                                  type="number"
-                                  value={editTrack}
-                                  onChange={e => setEditTrack(e.target.value)}
-                                  style={{ fontSize: '11px', padding: '2px 4px', width: '100%' }}
-                                />
-                              </td>
-                            </tr>
-                            <tr>
-                              <td>Width</td>
-                              <td>
-                                <input
-                                  aria-label="Width"
-                                  type="number"
-                                  value={editWidth}
-                                  onChange={e => setEditWidth(e.target.value)}
-                                  style={{ fontSize: '11px', padding: '2px 4px', width: '100%' }}
-                                />
-                              </td>
-                            </tr>
-                            <tr>
-                              <td>Description</td>
-                              <td>
-                                <textarea
-                                  aria-label="Description"
-                                  value={editDescription}
-                                  onChange={e => setEditDescription(e.target.value)}
-                                  rows={3}
-                                  style={{
-                                    fontSize: '11px', padding: '2px 4px', width: '100%',
-                                    boxSizing: 'border-box', resize: 'vertical',
-                                    fontFamily: 'inherit',
-                                  }}
-                                />
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                        <br />
-                        {popupPhotos.length > 0 && (
-                          <>
-                            <label style={{ fontSize: '11px' }}>Photos:</label><br />
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', margin: '4px 0' }}>
-                              {popupPhotos.map((photo, i) => (
-                                <img
-                                  key={photo.path}
-                                  src={photo.url}
-                                  alt={`photo ${i + 1}`}
-                                  style={{
-                                    width: '48px', height: '48px', objectFit: 'cover',
-                                    borderRadius: '3px', border: '1px solid #ccc', cursor: 'pointer',
-                                  }}
-                                  onClick={(e) => { e.stopPropagation(); setFullPhotoIndex(i); }}
-                                />
-                              ))}
-                            </div>
-                          </>
-                        )}
-                        <label style={{ fontSize: '11px' }}>Add photos:</label><br />
-                        <input type="file" multiple accept="image/*"
-                          onChange={(e) => previewPhotos(e)}
-                          placeholder="new picture"
-                          className="popup-file-input"
-                        /><br /><br />
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <button
-                            className="popup-btn"
-                            onClick={(e) => {
-                              console.log(popupInfo.properties);
-                              handleSubmit(e, popupInfo.properties.id);
-                              setPopupInfo(null);
-                            }}
-                          >
-                            Upload
-                          </button>
-                          <button
-                            className="popup-btn popup-btn-danger"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteLocation(popupInfo.properties.id);
-                              setPopupInfo(null);
-                            }}
-                          >
-                            Delete
-                          </button>
-                          <button
-                            className="popup-btn popup-btn-primary"
-                            onClick={(e) => { e.stopPropagation(); handleUpdatePopup(popupInfo.properties.id); }}
-                          >
-                            Apply
-                          </button>
-                        </div>
-                      </div>
-                    </Popup>
-                    {fullPhotoIndex != null && popupPhotos[fullPhotoIndex] && (
-                      <div
-                        onClick={() => setFullPhotoIndex(null)}
-                        style={{
-                          position: 'fixed', inset: 0, zIndex: 1000,
-                          background: 'rgba(0,0,0,0.75)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          cursor: 'zoom-out',
-                        }}
-                      >
-                        {popupPhotos.length > 1 && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setFullPhotoIndex((fullPhotoIndex - 1 + popupPhotos.length) % popupPhotos.length);
-                            }}
-                            style={{
-                              position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)',
-                              fontSize: '28px', padding: '8px 14px', cursor: 'pointer',
-                              border: 'none', borderRadius: '50%',
-                              background: 'rgba(255,255,255,0.85)', color: '#333',
-                            }}
-                            aria-label="Previous picture"
-                          >
-                            ‹
-                          </button>
-                        )}
-                        <img
-                          src={popupPhotos[fullPhotoIndex].url}
-                          alt={`full size ${fullPhotoIndex + 1} of ${popupPhotos.length}`}
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ maxWidth: '90vw', maxHeight: '85vh', objectFit: 'contain', borderRadius: '4px', cursor: 'default' }}
-                        />
-                        {popupPhotos.length > 1 && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setFullPhotoIndex((fullPhotoIndex + 1) % popupPhotos.length);
-                            }}
-                            style={{
-                              position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)',
-                              fontSize: '28px', padding: '8px 14px', cursor: 'pointer',
-                              border: 'none', borderRadius: '50%',
-                              background: 'rgba(255,255,255,0.85)', color: '#333',
-                            }}
-                            aria-label="Next picture"
-                          >
-                            ›
-                          </button>
-                        )}
-                        <div
+                  {/* Blue dot + heading cone for the active Street View position. */}
+                  {svOpen && svPos && (
+                    <>
+                      {/* Heading cone: a semi-transparent blue wedge marker rotated to
+                          the panorama's heading, showing the field-of-view direction. */}
+                      <AdvancedMarker position={{ lat: svPos.lat, lng: svPos.lng }}>
+                        <svg
+                          width="44"
+                          height="44"
+                          viewBox="0 0 44 44"
+                          aria-hidden="true"
                           style={{
-                            position: 'absolute', bottom: '20px', left: '50%', transform: 'translateX(-50%)',
-                            display: 'flex', alignItems: 'center', gap: '12px',
+                            pointerEvents: 'none',
+                            transform: `rotate(${svHeading}deg)`,
+                            transformOrigin: 'center',
                           }}
-                          onClick={(e) => e.stopPropagation()}
                         >
-                          <span style={{ color: '#fff', fontSize: '13px', fontWeight: 600 }}>
-                            {fullPhotoIndex + 1} / {popupPhotos.length}
-                          </span>
-                          <button
-                            className="popup-btn popup-btn-danger"
-                            style={{ flex: 'none' }}
-                            onClick={() => deletePopupPhoto(popupInfo.properties.id, popupPhotos[fullPhotoIndex].path)}
-                          >
-                            Delete picture
-                          </button>
-                        </div>
-                      </div>
-                    )}
+                          {/* Field-of-view wedge (cone) opening upward, ~60° wide. */}
+                          <path
+                            d="M22 22 L9 4 A20 20 0 0 1 35 4 Z"
+                            fill="#1a73e8"
+                            fillOpacity="0.25"
+                            stroke="#1a73e8"
+                            strokeWidth="1"
+                            strokeOpacity="0.7"
+                          />
+                          {/* Center location dot. */}
+                          <circle cx="22" cy="22" r="6" fill="#1a73e8" />
+                          <circle cx="22" cy="22" r="11" fill="none" stroke="#1a73e8" strokeWidth="1.4" opacity="0.45" />
+                        </svg>
+                      </AdvancedMarker>
+                    </>
+                  )}
 
-                  </>
+                  {/* Location points: circle for line/point tracks, square glyph for polygon tracks. */}
+                  {location
+                    .filter(loc => loc.lat != null && loc.lng != null)
+                    .map(loc => {
+                      const color = TYPE_COLOR_MAP[loc.type ?? ''] ?? '#2b6cb0';
+                      const trackGeometry = loc.track != null ? (trackGeometryMap[loc.track] ?? '') : '';
+                      const isPolygon = trackGeometry === 'polygon';
+                      const isPointGeom = trackGeometry === 'point';
+                      return (
+                        <AdvancedMarker
+                          key={loc.id}
+                          position={{ lat: loc.lat!, lng: loc.lng! }}
+                          title={`Track ${loc.track ?? ''} — ${loc.type ?? ''}`}
+                          onClick={() => openPopupForLocation(loc)}
+                          onMouseEnter={() => onMarkerMouseEnter(loc)}
+                          onMouseLeave={onMarkerMouseLeave}
+                        >
+                          {isPolygon ? (
+                            <div style={{
+                              fontSize: '16px', lineHeight: 1, color,
+                              textShadow: '0 0 1px #fff, 0 0 1px #fff',
+                              cursor: 'pointer',
+                            }}>■</div>
+                          ) : (
+                            <div style={{
+                              width: 6,
+                              height: 6,
+                              borderRadius: '50%',
+                              background: isPointGeom ? 'transparent' : color,
+                              border: `2px solid ${color}`,
+                              opacity: 0.9,
+                              boxShadow: '0 0 0 1px rgba(0,0,0,0.2)',
+                              cursor: 'pointer',
+                            }} />
+                          )}
+                        </AdvancedMarker>
+                      );
+                    })}
 
-                )}
-                <NavigationControl position="top-right" />
-                <ScaleControl position="bottom-right" unit='imperial' maxWidth={500} />
-                <GeolocateControl position="top-right" positionOptions={{ enableHighAccuracy: true }}
-                  trackUserLocation={true}
-                  // Draw an arrow next to the location dot to indicate which direction the device is heading.
-                  showUserHeading={true} />
-                <RadioGroupField legend="Row" name="row" direction="row" onChange={(e) => change_basemap(e.target.value)} defaultValue="street">
-                  <Radio value="light" >Light</Radio>
-                  <Radio value="street">Street</Radio>
-                  <Radio value="satellite">Satellite</Radio>
-                </RadioGroupField>
-                <div style={{
-                  position: 'absolute',
-                  bottom: '40px',
-                  left: '10px',
-                  background: 'rgba(255,255,255,0.92)',
-                  padding: '10px 14px',
-                  borderRadius: '6px',
-                  boxShadow: '0 1px 5px rgba(0,0,0,0.25)',
-                  fontSize: '12px',
-                  lineHeight: '1',
-                  zIndex: 1,
-                }}>
-                  <div style={{ fontWeight: 700, marginBottom: '8px', fontSize: '12px' }}>Legend</div>
-                  {([
-                    { label: 'Reuse',       color: '#b12bbd' },
-                    { label: 'Water',       color: '#2b6cb0' },
-                    { label: 'Wastewater',  color: '#2ea160' },
-                    { label: 'Stormwater',  color: '#eca4a4' },
-                    { label: 'Pavement',    color: '#a0a0a0' },
-                  ] as { label: string; color: string }[]).map(({ label, color }) => (
-                    <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                      <span style={{
-                        width: '12px', height: '12px', borderRadius: '50%',
-                        background: color, border: '2px solid #fff',
-                        boxShadow: '0 0 0 1px rgba(0,0,0,0.2)',
-                        flexShrink: 0,
+                  {/* Marker for a freshly picked (lat,lng) used when adding a new record. */}
+                  {(lat !== 0 || lng !== 0) && (
+                    <AdvancedMarker position={{ lat, lng }}>
+                      <div style={{
+                        width: 14, height: 14, borderRadius: '50%',
+                        background: '#ff0000', border: '2px solid #fff',
+                        boxShadow: '0 0 0 1px rgba(0,0,0,0.3)',
                       }} />
-                      {label}
-                    </div>
-                  ))}
-                </div>
-              </Map>
+                    </AdvancedMarker>
+                  )}
+
+                  {/* Hover tooltip. */}
+                  {hoverInfo && !popupInfo && (
+                    <InfoWindow
+                      position={{ lat: hoverInfo.latitude, lng: hoverInfo.longitude }}
+                      onCloseClick={() => setHoverInfo(null)}
+                    >
+                      <div
+                        className="hover-tooltip-inner"
+                        style={{ fontSize: '11px', lineHeight: '1.4', pointerEvents: 'none' }}
+                      >
+                        <div><b>Track:</b> {hoverInfo.track}</div>
+                        <div><b>Date:</b> {hoverInfo.date}</div>
+                        <div><b>Type:</b> {hoverInfo.type}</div>
+                      </div>
+                    </InfoWindow>
+                  )}
+
+                  {/* Editable info popup for a selected location. */}
+                  {popupInfo && (
+                    <>
+                      <InfoWindow
+                        position={{ lat: popupInfo.latitude, lng: popupInfo.longitude }}
+                        onCloseClick={() => setPopupInfo(null)}
+                      >
+                        <div className="popup">
+                          <table className="popup-table">
+                            <tbody>
+                              <tr>
+                                <td>Date</td>
+                                <td>
+                                  <input
+                                    aria-label="Date"
+                                    type="date"
+                                    value={editDate}
+                                    onChange={e => setEditDate(e.target.value)}
+                                    style={{ fontSize: '11px', padding: '2px 4px', width: '100%' }}
+                                  />
+                                </td>
+                              </tr>
+                              <tr>
+                                <td>Time</td>
+                                <td>
+                                  <input
+                                    aria-label="Time"
+                                    type="time"
+                                    value={editTime}
+                                    onChange={e => setEditTime(e.target.value)}
+                                    style={{ fontSize: '11px', padding: '2px 4px', width: '100%' }}
+                                  />
+                                </td>
+                              </tr>
+                              <tr>
+                                <td>Type</td>
+                                <td>
+                                  {/* Native selects can't wrap their selected value, so show it in a
+                                      wrapped 3-line box with a transparent select overlaid on top. */}
+                                  <div style={{ position: 'relative' }}>
+                                    <div style={{
+                                      fontSize: '11px', padding: '2px 18px 2px 4px', width: '100%',
+                                      minHeight: '3.6em', lineHeight: '1.2em',
+                                      border: '1px solid #ccc', borderRadius: '3px',
+                                      background: '#fff', whiteSpace: 'normal', wordBreak: 'break-word',
+                                      boxSizing: 'border-box',
+                                    }}>
+                                      {editType}
+                                      <span style={{ position: 'absolute', right: '4px', top: '2px', color: '#666' }}>▾</span>
+                                    </div>
+                                    <select
+                                      aria-label="Type"
+                                      value={editType}
+                                      onChange={e => setEditType(e.target.value)}
+                                      style={{
+                                        position: 'absolute', inset: 0, width: '100%', height: '100%',
+                                        opacity: 0, cursor: 'pointer',
+                                      }}
+                                    >
+                                      {options.map((option) => {
+                                        const color = option.geometry === 'line' ? 'darkgreen'
+                                          : option.geometry === 'polygon' ? 'darkblue' : 'dimgrey';
+                                        return (
+                                          <option key={option.value} value={option.value}
+                                            style={{ color, whiteSpace: 'normal' }}>
+                                            {option.label}
+                                          </option>
+                                        );
+                                      })}
+                                    </select>
+                                  </div>
+                                </td>
+                              </tr>
+                              <tr>
+                                <td>Track</td>
+                                <td>
+                                  <input
+                                    aria-label="Track"
+                                    type="number"
+                                    value={editTrack}
+                                    onChange={e => setEditTrack(e.target.value)}
+                                    style={{ fontSize: '11px', padding: '2px 4px', width: '100%' }}
+                                  />
+                                </td>
+                              </tr>
+                              <tr>
+                                <td>Width</td>
+                                <td>
+                                  <input
+                                    aria-label="Width"
+                                    type="number"
+                                    value={editWidth}
+                                    onChange={e => setEditWidth(e.target.value)}
+                                    style={{ fontSize: '11px', padding: '2px 4px', width: '100%' }}
+                                  />
+                                </td>
+                              </tr>
+                              <tr>
+                                <td>Description</td>
+                                <td>
+                                  <textarea
+                                    aria-label="Description"
+                                    value={editDescription}
+                                    onChange={e => setEditDescription(e.target.value)}
+                                    rows={3}
+                                    style={{
+                                      fontSize: '11px', padding: '2px 4px', width: '100%',
+                                      boxSizing: 'border-box', resize: 'vertical',
+                                      fontFamily: 'inherit',
+                                    }}
+                                  />
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+                          <br />
+                          {popupPhotos.length > 0 && (
+                            <>
+                              <label style={{ fontSize: '11px' }}>Photos:</label><br />
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', margin: '4px 0' }}>
+                                {popupPhotos.map((photo, i) => (
+                                  <img
+                                    key={photo.path}
+                                    src={photo.url}
+                                    alt={`photo ${i + 1}`}
+                                    style={{
+                                      width: '48px', height: '48px', objectFit: 'cover',
+                                      borderRadius: '3px', border: '1px solid #ccc', cursor: 'pointer',
+                                    }}
+                                    onClick={(e) => { e.stopPropagation(); setFullPhotoIndex(i); }}
+                                  />
+                                ))}
+                              </div>
+                            </>
+                          )}
+                          <label style={{ fontSize: '11px' }}>Add photos:</label><br />
+                          <input type="file" multiple accept="image/*"
+                            onChange={(e) => previewPhotos(e)}
+                            placeholder="new picture"
+                            className="popup-file-input"
+                          /><br /><br />
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button
+                              className="popup-btn"
+                              onClick={(e) => {
+                                console.log(popupInfo.properties);
+                                handleSubmit(e, popupInfo.properties.id);
+                                setPopupInfo(null);
+                              }}
+                            >
+                              Upload
+                            </button>
+                            <button
+                              className="popup-btn popup-btn-danger"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteLocation(popupInfo.properties.id);
+                                setPopupInfo(null);
+                              }}
+                            >
+                              Delete
+                            </button>
+                            <button
+                              className="popup-btn popup-btn-primary"
+                              onClick={(e) => { e.stopPropagation(); handleUpdatePopup(popupInfo.properties.id); }}
+                            >
+                              Apply
+                            </button>
+                          </div>
+                        </div>
+                      </InfoWindow>
+                      {fullPhotoIndex != null && popupPhotos[fullPhotoIndex] && (
+                        <div
+                          onClick={() => setFullPhotoIndex(null)}
+                          style={{
+                            position: 'fixed', inset: 0, zIndex: 1000,
+                            background: 'rgba(0,0,0,0.75)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            cursor: 'zoom-out',
+                          }}
+                        >
+                          {popupPhotos.length > 1 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFullPhotoIndex((fullPhotoIndex - 1 + popupPhotos.length) % popupPhotos.length);
+                              }}
+                              style={{
+                                position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)',
+                                fontSize: '28px', padding: '8px 14px', cursor: 'pointer',
+                                border: 'none', borderRadius: '50%',
+                                background: 'rgba(255,255,255,0.85)', color: '#333',
+                              }}
+                              aria-label="Previous picture"
+                            >
+                              ‹
+                            </button>
+                          )}
+                          <img
+                            src={popupPhotos[fullPhotoIndex].url}
+                            alt={`full size ${fullPhotoIndex + 1} of ${popupPhotos.length}`}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ maxWidth: '90vw', maxHeight: '85vh', objectFit: 'contain', borderRadius: '4px', cursor: 'default' }}
+                          />
+                          {popupPhotos.length > 1 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFullPhotoIndex((fullPhotoIndex + 1) % popupPhotos.length);
+                              }}
+                              style={{
+                                position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)',
+                                fontSize: '28px', padding: '8px 14px', cursor: 'pointer',
+                                border: 'none', borderRadius: '50%',
+                                background: 'rgba(255,255,255,0.85)', color: '#333',
+                              }}
+                              aria-label="Next picture"
+                            >
+                              ›
+                            </button>
+                          )}
+                          <div
+                            style={{
+                              position: 'absolute', bottom: '20px', left: '50%', transform: 'translateX(-50%)',
+                              display: 'flex', alignItems: 'center', gap: '12px',
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <span style={{ color: '#fff', fontSize: '13px', fontWeight: 600 }}>
+                              {fullPhotoIndex + 1} / {popupPhotos.length}
+                            </span>
+                            <button
+                              className="popup-btn popup-btn-danger"
+                              style={{ flex: 'none' }}
+                              onClick={() => deletePopupPhoto(popupInfo.properties.id, popupPhotos[fullPhotoIndex].path)}
+                            >
+                              Delete picture
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Custom geolocate control (react-google-maps has no built-in one). */}
+                  <GeolocateButton />
+
+                  <div style={{
+                    position: 'absolute',
+                    top: '10px',
+                    left: '10px',
+                    background: 'rgba(255,255,255,0.92)',
+                    padding: '6px 10px',
+                    borderRadius: '6px',
+                    boxShadow: '0 1px 5px rgba(0,0,0,0.25)',
+                    zIndex: 1,
+                  }}>
+                    <RadioGroupField
+                      legend="Row"
+                      name="row"
+                      legendHidden
+                      direction="row"
+                      onChange={(e) => change_basemap(e.target.value)}
+                      defaultValue="street"
+                    >
+                      <Radio value="street">Street</Radio>
+                      <Radio value="satellite">Satellite</Radio>
+                    </RadioGroupField>
+                  </div>
+                  <div style={{
+                    position: 'absolute',
+                    top: '16px',
+                    left: '200px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    zIndex: 1,
+                  }}>
+                    <button
+                      onClick={() => setShowOverlays(s => !s)}
+                      title={showOverlays ? 'Hide reference overlays' : 'Show reference overlays'}
+                      style={{
+                        height: '24px',
+                        padding: '0 8px',
+                        background: showOverlays ? '#1a73e8' : '#fff',
+                        color: showOverlays ? '#fff' : '#5f6368',
+                        border: '1px solid rgba(0,0,0,0.2)',
+                        borderRadius: '4px',
+                        boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        lineHeight: 1,
+                      }}
+                    >
+                      Reference {showOverlays ? '✓' : ''}
+                    </button>
+                    <button
+                      onClick={() => setShowLegend(s => !s)}
+                      title={showLegend ? 'Hide legend' : 'Show legend'}
+                      style={{
+                        height: '24px',
+                        padding: '0 8px',
+                        background: showLegend ? '#1a73e8' : '#fff',
+                        color: showLegend ? '#fff' : '#5f6368',
+                        border: '1px solid rgba(0,0,0,0.2)',
+                        borderRadius: '4px',
+                        boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        lineHeight: 1,
+                      }}
+                    >
+                      Legend {showLegend ? '✓' : ''}
+                    </button>
+                  </div>
+                  {showLegend && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    background: 'rgba(255,255,255,0.92)',
+                    padding: '10px 14px',
+                    borderRadius: '6px',
+                    boxShadow: '0 1px 5px rgba(0,0,0,0.25)',
+                    fontSize: '12px',
+                    lineHeight: '1',
+                    zIndex: 1,
+                  }}>
+                    <div style={{ fontWeight: 700, marginBottom: '8px', fontSize: '12px' }}>Legend</div>
+                    {([
+                      { label: 'Reuse',       color: '#b12bbd' },
+                      { label: 'Water',       color: '#2b6cb0' },
+                      { label: 'Wastewater',  color: '#2ea160' },
+                      { label: 'Stormwater',  color: '#eca4a4' },
+                      { label: 'Pavement',    color: '#a0a0a0' },
+                    ] as { label: string; color: string }[]).map(({ label, color }) => (
+                      <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                        <span style={{
+                          width: '12px', height: '12px', borderRadius: '50%',
+                          background: color, border: '2px solid #fff',
+                          boxShadow: '0 0 0 1px rgba(0,0,0,0.2)',
+                          flexShrink: 0,
+                        }} />
+                        {label}
+                      </div>
+                    ))}
+                  </div>
+                  )}
+                  {/* Live zoom-level readout (bottom-center). */}
+                  <div style={{
+                    position: 'absolute',
+                    bottom: '10px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    background: 'rgba(255,255,255,0.92)',
+                    padding: '2px 10px',
+                    borderRadius: '4px',
+                    boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    color: '#1a365d',
+                    zIndex: 1,
+                    pointerEvents: 'none',
+                    fontFamily: 'monospace',
+                  }}>
+                    Zoom: {zoomLevel.toFixed(1)}
+                  </div>
+                </GoogleMap>
+              </APIProvider>
             </>)
           }],
           ...(showAdminTabs ? [{

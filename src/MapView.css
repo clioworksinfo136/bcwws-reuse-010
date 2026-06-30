@@ -83,7 +83,50 @@
 .toolbar-inputs select,
 .toolbar-inputs .amplify-input,
 .toolbar-inputs .amplify-select {
-  height: 42px;
-  min-height: 42px;
+  height: 30px;
+  min-height: 30px;
   box-sizing: border-box;
 }
+
+/* Raise the selected text inside the Type SelectField so it's fully visible
+   in the shorter 30px box (Amplify centers it, which clips the bottom). */
+.toolbar-inputs .amplify-select {
+  display: flex;
+  align-items: flex-start;
+  padding-top: 2px;
+  padding-bottom: 0;
+  line-height: 1.1;
+}
+
+/* Tighten the toolbar row so its inputs sit higher and gaps are smaller,
+   reclaiming vertical space for the map below. */
+.toolbar-inputs {
+  margin-top: 4px;
+  gap: 8px;
+}
+.toolbar-inputs label {
+  margin-bottom: 0;
+}
+
+/* Shrink all native Google Maps controls (zoom +/-, fullscreen, pegman, etc.).
+   Applied via transform so layout boxes still reserve their original space. */
+.gm-style button[draggable="false"] {
+  transform: scale(0.7);
+}
+.gm-style button.gm-fullscreen-control,
+.gm-style div.gm-style-mtc,
+.gm-style div.gm-style-mtc button {
+  transform: scale(0.7);
+}
+
+/* Hover tooltip is non-interactive (click-through) so it can never steal the
+   mouse from the marker beneath it — this eliminates the hover flicker loop.
+   Scoped to any InfoWindow whose content carries .hover-tooltip-inner. */
+.gm-style:has(.hover-tooltip-inner) .gm-style-iw,
+.gm-style:has(.hover-tooltip-inner) .gm-style-iw-c,
+.gm-style:has(.hover-tooltip-inner) .gm-style-iw-t,
+.gm-style:has(.hover-tooltip-inner) button.gm-ui-hover-effect,
+.gm-style:has(.hover-tooltip-inner) .hover-tooltip-inner {
+  pointer-events: none !important;
+}
+
